@@ -478,7 +478,7 @@ func (r *Runner) getNextGlobalSession(ctx context.Context) (*types.Session, erro
 
 func (r *Runner) getNextGlobalLLMInferenceRequest(ctx context.Context) (*types.RunnerLLMInferenceRequest, error) {
 	freeMemory := r.getHypotheticalFreeMemory()
-	log.Debug().Msgf("freeMemory: %dB", freeMemory)
+	log.Debug().Msgf("freeMemory: %dGB", GiB(freeMemory))
 
 	// only run one for dev mode
 	if r.Options.MaxModelInstances > 0 && r.activeModelInstances.Size() >= r.Options.MaxModelInstances {
@@ -767,7 +767,6 @@ func (r *Runner) getFreeMemory() int64 {
 }
 
 func (r *Runner) getHypotheticalFreeMemory() int64 {
-	log.Debug().Int64("r.Options.MemoryBytes", int64(r.Options.MemoryBytes)).Int64("r.getUsedMemoryByNonStale()", int64(r.getUsedMemoryByNonStale())).Int64("result", int64(r.Options.MemoryBytes)-int64(r.getUsedMemoryByNonStale())).Msg("getHypotheticalFreeMemory")
 	return int64(r.Options.MemoryBytes) - int64(r.getUsedMemoryByNonStale())
 }
 

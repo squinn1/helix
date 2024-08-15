@@ -376,6 +376,7 @@ func (i *OllamaInferenceModelInstance) Filter() types.SessionFilter {
 	return types.SessionFilter{
 		ModelName: i.modelName,
 		Mode:      types.SessionModeInference,
+		Memory:    i.model.GetMemoryRequirements(types.SessionModeInference),
 	}
 }
 
