@@ -11,6 +11,7 @@ import (
 	"github.com/helixml/helix/api/pkg/model"
 	"github.com/helixml/helix/api/pkg/pubsub"
 	"github.com/helixml/helix/api/pkg/types"
+	"github.com/rs/zerolog/log"
 )
 
 const schedulingDecisionHistorySize = 10
@@ -120,6 +121,7 @@ func filterLLMInferenceRequest(reqs []*types.RunnerLLMInferenceRequest, filter t
 			continue
 		}
 
+		log.Debug().Str("model", req.Request.Model).Uint64("memoryRequirement", memoryRequirement).Uint64("filter.Memory", filter.Memory).Msg("Adding request to filteredReqs")
 		filteredReqs = append(filteredReqs, req)
 	}
 

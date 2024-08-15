@@ -478,6 +478,7 @@ func (r *Runner) getNextGlobalSession(ctx context.Context) (*types.Session, erro
 
 func (r *Runner) getNextGlobalLLMInferenceRequest(ctx context.Context) (*types.RunnerLLMInferenceRequest, error) {
 	freeMemory := r.getHypotheticalFreeMemory()
+	log.Debug().Msgf("freeMemory: %dB", freeMemory)
 
 	// only run one for dev mode
 	if r.Options.MaxModelInstances > 0 && r.activeModelInstances.Size() >= r.Options.MaxModelInstances {
@@ -732,6 +733,7 @@ func (r *Runner) getNextLLMInferenceRequest(ctx context.Context, queryParams url
 		return nil, err
 	}
 
+	log.Debug().Msgf("🟠 Got LLM inference request %s", buffer.String())
 	return inferenceRequest, nil
 }
 

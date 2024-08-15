@@ -36,6 +36,7 @@ func (apiServer *HelixAPIServer) runnerLLMInferenceRequestHandler(res http.Respo
 			return nil, err
 		}
 	}
+	log.Debug().Str("runner_id", runnerID).Str("model_name", string(modelName)).Str("memoryString", memoryString).Uint64("memory", memory).Msg("runnerLLMInferenceRequestHandler")
 
 	older := req.URL.Query().Get("older")
 

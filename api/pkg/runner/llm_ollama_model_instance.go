@@ -60,6 +60,7 @@ func NewOllamaInferenceModelInstance(ctx context.Context, cfg *InferenceModelIns
 		runnerOptions:   cfg.RunnerOptions,
 		jobHistory:      []*types.SessionSummary{},
 		lastActivity:    time.Now(),
+		inFlight:        false,
 	}
 
 	// Enqueue the first request
@@ -107,10 +108,16 @@ type OllamaInferenceModelInstance struct {
 	// // the session currently running on this model
 	currentRequest *types.RunnerLLMInferenceRequest
 
+	// A muted to protect lastActivity and inFlight from concurrent access
+	lock sync.Mutex
+
 	// the timestamp of when this model instance either completed a job
 	// or a new job was pulled and allocated
 	// we use this timestamp to cleanup non-active model instances
 	lastActivity time.Time
+
+	// a flag to indicate if the model is currently processing a request
+	inFlight bool
 
 	// a history of the session IDs
 	jobHistory []*types.SessionSummary
@@ -146,9 +153,15 @@ func (i *OllamaInferenceModelInstance) Start(ctx context.Context) error {
 				log.Info().Str("session_id", req.SessionID).Msg("🟢 processing request")
 
 				i.currentRequest = req
+				i.lock.Lock()
 				i.lastActivity = time.Now()
+				i.inFlight = true
+				i.lock.Unlock()
 
 				err := i.processInteraction(req)
+				i.lock.Lock()
+				i.inFlight = false
+				i.lock.Unlock()
 				if err != nil {
 					log.Error().
 						Str("session_id", req.SessionID).
@@ -367,6 +380,15 @@ func (i *OllamaInferenceModelInstance) Filter() types.SessionFilter {
 }
 
 func (i *OllamaInferenceModelInstance) Stale() bool {
+	i.lock.Lock()
+	defer i.lock.Unlock()
+
+	// Never stale if we are in flight
+	if i.inFlight {
+		return false
+	}
+
+	// Otherwise it's stale if we haven't seen any activity for a while
 	return time.Since(i.lastActivity) > i.runnerOptions.Config.Runtimes.Ollama.InstanceTTL
 }
 
