@@ -274,12 +274,22 @@ func (i *OllamaInferenceModelInstance) startOllamaServer(ctx context.Context) er
 		return err
 	}
 
+	stdoutWriters := []io.Writer{os.Stdout, stderrBuf}
+	stdoutPipe, err := cmd.StdoutPipe()
+	if err != nil {
+		return err
+	}
+
 	// stream stderr to os.Stderr (so we can see it in the logs)
 	// and also the error buffer we will use to post the error to the api
 	go func() {
 		_, err := io.Copy(io.MultiWriter(stderrWriters...), stderrPipe)
 		if err != nil {
 			log.Error().Msgf("Error copying stderr: %v", err)
+		}
+		_, err = io.Copy(io.MultiWriter(stdoutWriters...), stdoutPipe)
+		if err != nil {
+			log.Error().Msgf("Error copying stdout: %v", err)
 		}
 	}()
 
