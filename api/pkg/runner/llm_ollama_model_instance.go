@@ -146,9 +146,27 @@ func (i *OllamaInferenceModelInstance) Start(ctx context.Context) error {
 				log.Info().Str("session_id", req.SessionID).Msg("🟢 processing request")
 
 				i.currentRequest = req
-				i.lastActivity = time.Now()
+
+				// Create a ticker to update the lastActivity timestamp whilst the model is
+				// processing. It should use a parent context to deal with cancellations. The ticker
+				// should be stopped when the model is finished processing.
+				ticker := time.NewTicker(1 * time.Second)
+				cancelCtx, cancelTicker := context.WithCancel(i.ctx)
+				defer cancelTicker()
+				go func() {
+					for {
+						select {
+						case <-ticker.C:
+							i.lastActivity = time.Now()
+						case <-cancelCtx.Done():
+							ticker.Stop()
+							return
+						}
+					}
+				}()
 
 				err := i.processInteraction(req)
+				cancelTicker()
 				if err != nil {
 					log.Error().
 						Str("session_id", req.SessionID).
