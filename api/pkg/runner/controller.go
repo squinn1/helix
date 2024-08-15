@@ -757,6 +757,7 @@ func (r *Runner) getUsedMemoryByNonStale() uint64 {
 		}
 		return true
 	})
+	log.Debug().Uint64("memoryUsed", memoryUsed).Msg("getUsedMemoryByNonStale")
 
 	return memoryUsed
 }
@@ -766,6 +767,7 @@ func (r *Runner) getFreeMemory() int64 {
 }
 
 func (r *Runner) getHypotheticalFreeMemory() int64 {
+	log.Debug().Int64("r.Options.MemoryBytes", int64(r.Options.MemoryBytes)).Int64("r.getUsedMemoryByNonStale()", int64(r.getUsedMemoryByNonStale())).Msg("getHypotheticalFreeMemory")
 	return int64(r.Options.MemoryBytes) - int64(r.getUsedMemoryByNonStale())
 }
 
