@@ -100,6 +100,7 @@ func (r *Runner) createInferenceModelInstance(ctx context.Context, request *type
 				queryParams.Add("mode", string(modelInstance.Filter().Mode))
 				queryParams.Add("memory", fmt.Sprintf("%d", modelInstance.Filter().Memory))
 
+				log.Debug().Uint64("memory", modelInstance.Filter().Memory).Msg("GetNextRequest inside createInferenceModelInstance ")
 				nextRequest, err := r.getNextLLMInferenceRequest(ctx, queryParams)
 				if err != nil {
 					return nil, err
