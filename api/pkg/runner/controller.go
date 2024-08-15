@@ -328,10 +328,12 @@ func (r *Runner) checkForStaleModelInstances(_ context.Context, newModel model.M
 		stales    []ModelInstance
 	)
 
+	log.Debug().Msgf("🔵 runner checking for stale model instances")
 	r.activeModelInstances.Range(func(key string, activeModelInstance ModelInstance) bool {
 		allModels = append(allModels, activeModelInstance)
 
 		if activeModelInstance.Stale() {
+			log.Debug().Msgf("🔵 runner found stale model instance %s", activeModelInstance.ID())
 			stales = append(stales, activeModelInstance)
 		}
 		return true
@@ -341,20 +343,27 @@ func (r *Runner) checkForStaleModelInstances(_ context.Context, newModel model.M
 	sort.Slice(stales, func(i, j int) bool {
 		return stales[i].Model().GetMemoryRequirements(stales[i].Filter().Mode) < stales[j].Model().GetMemoryRequirements(stales[j].Filter().Mode)
 	})
+	log.Debug().Msgf("🔵 runner found %d stale model instances", len(stales))
+	if len(stales) > 0 {
+		log.Debug().Msgf("🔵 biggest model (%s) %d", stales[0].ID(), stales[0].Model().GetMemoryRequirements(types.SessionModeInference))
+	}
 
 	// we don't need to free as much memory as we already have free
 	currentlyAvailableMemory := r.getFreeMemory()
 	if currentlyAvailableMemory < 0 {
 		currentlyAvailableMemory = 0
 	}
+	log.Debug().Msgf("🔵 currently available memory: %.2f GiB", GiB(int64(currentlyAvailableMemory)))
 
 	// for this session
 	newSessionMemory := newModel.GetMemoryRequirements(mode)
 	// this can go negative, so it needs to be a signed integer!
 	requiredMemoryFreed := int64(newSessionMemory) - int64(currentlyAvailableMemory)
+	log.Debug().Msgf("🔵 required memory freed: %.2f GiB", GiB(requiredMemoryFreed))
 
 	if requiredMemoryFreed <= 0 {
 		r.addSchedulingDecision("Didn't need to kill any stale sessions because required memory <= 0")
+		log.Debug().Msgf("didn't need to kill any stale sessions because required memory <= 0")
 		return nil
 	}
 
