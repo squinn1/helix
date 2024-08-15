@@ -255,6 +255,8 @@ func (r *Runner) pollSessions(ctx context.Context) error {
 		if err != nil {
 			return fmt.Errorf("error getting model %s: %s", session.ModelName, err.Error())
 		}
+		log.Debug().Msgf("🔵 runner got session for model %s (%s, %d)", session.ModelName, aiModel.GetType(), aiModel.GetMemoryRequirements(session.Mode))
+
 		// if we need to kill any stale sessions, do it now
 
 		// check for running model instances that have not seen a job in a while

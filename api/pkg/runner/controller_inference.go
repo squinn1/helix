@@ -63,6 +63,7 @@ func (r *Runner) pollInferenceRequests(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("error getting model %s: %s", modelName, err.Error())
 	}
+	log.Debug().Msgf("🔵 runner got inference request for model %s (%s, %d)", modelName, aiModel.GetType(), aiModel.GetMemoryRequirements(types.SessionModeInference))
 
 	// if we need to kill any stale sessions, do it now
 	// check for running model instances that have not seen a job in a while
