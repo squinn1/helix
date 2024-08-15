@@ -376,7 +376,6 @@ func (i *OllamaInferenceModelInstance) Filter() types.SessionFilter {
 }
 
 func (i *OllamaInferenceModelInstance) Stale() bool {
-	log.Debug().Msgf("checking if stale: %s, %s > %s", i.id, time.Since(i.lastActivity), i.runnerOptions.Config.Runtimes.Ollama.InstanceTTL)
 	return time.Since(i.lastActivity) > i.runnerOptions.Config.Runtimes.Ollama.InstanceTTL
 }
 
