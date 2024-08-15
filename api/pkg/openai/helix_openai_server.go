@@ -113,7 +113,7 @@ func filterLLMInferenceRequest(reqs []*types.RunnerLLMInferenceRequest, filter t
 			continue
 		}
 
-		if filter.Memory != 0 && memoryRequirement > filter.Memory {
+		if memoryRequirement > filter.Memory {
 			continue
 		}
 

@@ -748,8 +748,10 @@ func (r *Runner) getUsedMemory() uint64 {
 
 func (r *Runner) getUsedMemoryByNonStale() uint64 {
 	memoryUsed := uint64(0)
+	log.Debug().Int("activeModelInstances.Size", r.activeModelInstances.Size()).Msg("getUsedMemoryByNonStale")
 
 	r.activeModelInstances.Range(func(i string, modelInstance ModelInstance) bool {
+		log.Debug().Bool("stale", modelInstance.Stale()).Uint64("memory", modelInstance.Model().GetMemoryRequirements(modelInstance.Filter().Mode)).Msg("getUsedMemoryByNonStale")
 		if !modelInstance.Stale() {
 			memoryUsed += modelInstance.Model().GetMemoryRequirements(modelInstance.Filter().Mode)
 		}
