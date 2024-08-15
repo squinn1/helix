@@ -254,6 +254,7 @@ func (i *OllamaInferenceModelInstance) startOllamaServer(ctx context.Context) er
 	ollamaHost := fmt.Sprintf("0.0.0.0:%d", port)
 
 	cmd.Env = append(cmd.Env,
+		"OLLAMA_DEBUG=1",
 		"OLLAMA_KEEP_ALIVE=-1",
 		"HTTP_PROXY="+os.Getenv("HTTP_PROXY"),
 		"HTTPS_PROXY="+os.Getenv("HTTPS_PROXY"),
