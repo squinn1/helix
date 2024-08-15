@@ -262,8 +262,6 @@ func (i *OllamaInferenceModelInstance) startOllamaServer(ctx context.Context) er
 		"OLLAMA_MODELS="+i.runnerOptions.CacheDir, // Where to store the models
 	)
 
-	cmd.Stdout = os.Stdout
-
 	// this buffer is so we can keep the last 10kb of stderr so if
 	// there is an error we can send it to the api
 	stderrBuf := system.NewLimitedBuffer(1024 * 10)
