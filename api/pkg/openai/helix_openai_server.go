@@ -99,21 +99,23 @@ func pickRequest(reqs []*types.RunnerLLMInferenceRequest) (*types.RunnerLLMInfer
 func filterLLMInferenceRequest(reqs []*types.RunnerLLMInferenceRequest, filter types.InferenceRequestFilter) ([]*types.RunnerLLMInferenceRequest, error) {
 	var filteredReqs []*types.RunnerLLMInferenceRequest
 
-	modelName := types.ModelName(filter.ModelName)
-
-	var memoryRequirement uint64
-
-	model, err := model.GetModel(modelName)
-	if err == nil {
-		memoryRequirement = model.GetMemoryRequirements(types.SessionModeInference)
-	}
+	filterModel := types.ModelName(filter.ModelName)
 
 	for _, req := range reqs {
-		if filter.ModelName != "" && types.ModelName(req.Request.Model) != filter.ModelName {
+		requestModel := types.ModelName(req.Request.Model)
+
+		if filter.ModelName != "" && requestModel != filter.ModelName {
 			continue
 		}
 
-		if memoryRequirement > filter.Memory {
+		var memoryRequirement uint64
+
+		model, err := model.GetModel(requestModel)
+		if err == nil {
+			memoryRequirement = model.GetMemoryRequirements(types.SessionModeInference)
+		}
+
+		if filter.Memory != 0 && memoryRequirement > filter.Memory {
 			continue
 		}
 
@@ -121,12 +123,22 @@ func filterLLMInferenceRequest(reqs []*types.RunnerLLMInferenceRequest, filter t
 			continue
 		}
 
-		log.Debug().Str("model", req.Request.Model).Uint64("memoryRequirement", memoryRequirement).Uint64("filter.Memory", filter.Memory).Msg("Adding request to filteredReqs")
+		log.Trace().
+			Str("filter_model", filterModel.String()).
+			Str("request_id", req.RequestID).
+			Str("memory_filter_gb", fmt.Sprintf("%.2f", GiB(int64(filter.Memory)))).
+			Str("memory_requirement_gb", fmt.Sprintf("%.2f", GiB(int64(memoryRequirement)))).
+			Msgf("🟠 helix_openai_server GetNextLLMInferenceRequest")
+
 		filteredReqs = append(filteredReqs, req)
 	}
 
 	return filteredReqs, nil
 
+}
+
+func GiB(bytes int64) float32 {
+	return float32(bytes) / 1024 / 1024 / 1024
 }
 
 // ProcessRunnerResponse is called on both partial streaming and full responses coming from the runner
