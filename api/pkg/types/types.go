@@ -611,6 +611,7 @@ type RunnerProcessConfig struct {
 	MockRunner        bool
 	MockRunnerError   string
 	MockRunnerDelay   int
+	Port              int
 }
 
 // a session will run "tasks" on runners

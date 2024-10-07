@@ -230,6 +230,11 @@ func (r *Runner) startTaskLoop() {
 					debug.PrintStack()
 				}
 			}
+			// err := r.pollAxolotlRequests(r.Ctx)
+			// if err != nil {
+			// 	log.Error().Msgf("error in axolotl polling: %s", err.Error())
+			// 	debug.PrintStack()
+			// }
 
 			// Old-school session polling (images, finetuning, ollama)
 			err := r.pollSessions(r.Ctx)
@@ -614,16 +619,22 @@ func (r *Runner) createModelInstance(ctx context.Context, initialSession *types.
 		modelInstance, err = NewAxolotlModelInstance(
 			r.Ctx,
 			&ModelInstanceConfig{
-				InitialSession:    initialSession,
-				InitialSessionURL: r.Options.InitialSessionURL,
-				NextTaskURL:       r.Options.TaskURL,
-				// this function will convert any files it sees locally into an upload
-				// to the api server filestore - all files will be written to the filestore
-				// under a session sub path - you can include tar files and they will untarred at the other end
-				// into the filestore
-				// TODO: support the tar feature above
-				ResponseHandler: func(res *types.RunnerTaskResponse) error {
-					return r.handleWorkerResponse(res)
+				InitialSession:  initialSession,
+				ResponseHandler: r.handleWorkerResponse,
+				GetNextSession: func() (*types.Session, error) {
+					r.nextGlobalRequestMutex.Lock()
+					defer r.nextGlobalRequestMutex.Unlock()
+
+					queryParams := url.Values{}
+
+					queryParams.Add("model_name", string(modelInstance.Filter().ModelName))
+					queryParams.Add("mode", string(modelInstance.Filter().Mode))
+
+					nextRequest, err := r.getNextApiSession(ctx, queryParams)
+					if err != nil {
+						return nil, err
+					}
+					return nextRequest, nil
 				},
 				RunnerOptions: r.Options,
 			},

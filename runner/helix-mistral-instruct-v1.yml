@@ -1,0 +1,88 @@
+# Base model
+base_model: mistralai/Mistral-7B-Instruct-v0.1
+model_type: MistralForCausalLM
+tokenizer_type: LlamaTokenizer
+is_mistral_derived_model: true
+load_in_8bit: false
+load_in_4bit: true
+strict: false
+sequence_len: 8192
+bf16: true
+fp16: false
+tf32: false
+flash_attention: true
+special_tokens:
+  bos_token: "<s>"
+  eos_token: "</s>"
+  unk_token: "<unk>"
+
+# Data
+datasets:
+  - path: finetune_dataset.jsonl
+    type: sharegpt
+    ds_type: json
+dataset_prepared_path: dataset_cache
+warmup_steps: 0 # Datasets are sometimes small, don't warm up
+
+# Iterations
+# Should be 20, 1 for development
+num_epochs: 1
+
+# Evaluation
+val_set_size: 0 # 0 disables evaluation
+# eval_steps: 0.1
+# eval_table_size: 5
+# eval_table_max_new_tokens: 128
+# eval_sample_packing: false
+eval_batch_size: 1
+
+# QLoRA
+output_dir: ./qlora-out
+adapter: qlora
+lora_model_dir:
+# hyperparameters from QLoRA paper Appendix B.2
+# "We find hyperparameters to be largely robust across datasets"
+lora_r: 64
+lora_alpha: 16
+# 0.1 for models up to 13B
+# 0.05 for 33B and 65B models
+lora_dropout: 0.1
+# add LoRA modules on all linear layers of the base model
+lora_target_linear: true
+lora_fan_in_fan_out:
+lora_target_modules:
+
+# Sampling
+sample_packing: false # cauaes OOMs when true
+pad_to_sequence_len: false # significantly slows down training if true
+
+# Batching
+gradient_accumulation_steps: 1
+# This is the main setting that affects VRAM. It also affects speed and is dependent on GPU architecture.
+# decrease if OOM, increase for max VRAM utilization
+micro_batch_size: 6
+gradient_checkpointing: true
+
+# wandb
+wandb_project: 
+
+# Optimizer
+optimizer: paged_adamw_8bit # paging is some fancy NVIDIA VRAM paging thing which reduces VRAM usage.
+lr_scheduler: cosine
+learning_rate: 0.0002
+
+# Misc
+train_on_inputs: false
+group_by_length: false
+early_stopping_patience:
+resume_from_checkpoint:
+local_rank:
+logging_steps: 1
+xformers_attention:
+save_steps:
+debug:
+deepspeed:
+weight_decay: 0
+fsdp:
+fsdp_config:
+chat_template: "mistral_v1"
