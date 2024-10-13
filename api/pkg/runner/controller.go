@@ -230,11 +230,6 @@ func (r *Runner) startTaskLoop() {
 					debug.PrintStack()
 				}
 			}
-			// err := r.pollAxolotlRequests(r.Ctx)
-			// if err != nil {
-			// 	log.Error().Msgf("error in axolotl polling: %s", err.Error())
-			// 	debug.PrintStack()
-			// }
 
 			// Old-school session polling (images, finetuning, ollama)
 			err := r.pollSessions(r.Ctx)

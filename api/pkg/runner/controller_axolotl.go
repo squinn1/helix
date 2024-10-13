@@ -40,7 +40,7 @@ func (r *Runner) pollAxolotlRequests(ctx context.Context) error {
 
 	log.Info().
 		Str("request_id", request.ID).
-		Str("model_name", request.ModelName.String()).
+		Str("model_name", request.ModelName).
 		Msgf("🔵 runner start model instance")
 
 	_, err = r.createAxolotlModelInstance(ctx, request)
@@ -86,7 +86,7 @@ func (r *Runner) createAxolotlModelInstance(ctx context.Context, request *types.
 	}
 
 	log.Info().
-		Str("model_instance", modelInstance.Filter().ModelName.String()).
+		Str("model_instance", modelInstance.Filter().ModelName).
 		Msgf("🔵 runner started axolotl model instance: %s", modelInstance.ID())
 
 	r.activeModelInstances.Store(modelInstance.ID(), modelInstance)

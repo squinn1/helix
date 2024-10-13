@@ -635,6 +635,18 @@ func (i *AxolotlModelInstance) processInteraction(session *types.Session) error 
 				return fmt.Errorf("retrieving fine-tuning status: %w", err)
 			}
 			log.Info().Str("session_id", session.ID).Msgf("fine-tuning status: %s", status.Status)
+
+			// // Report progress
+			// err = i.responseHandler(&types.RunnerTaskResponse{
+			// 	Type:      types.WorkerTaskResponseTypeProgress,
+			// 	SessionID: session.ID,
+			// 	Progress: status.Status,
+			// })
+			// if err != nil {
+			// 	log.Error().Msgf("error writing event: %s", err.Error())
+			// 	return
+			// }
+
 			if status.Status == "succeeded" {
 				log.Info().Str("session_id", session.ID).Msg("fine-tuning complete")
 				// Signal the end of the stream
