@@ -661,7 +661,7 @@ func (i *AxolotlModelInstance) processInteraction(session *types.Session) error 
 				i.responseProcessor(session, types.Usage{}, "", true)
 				return nil
 			} else if status.Status == string(openai.RunStatusFailed) {
-				i.errorSession(session, fmt.Errorf("fine-tuning failed: %s", events.Data[0].Message))
+				i.errorSession(session, fmt.Errorf("fine-tuning failed: %s", events.Data[len(events.Data)-1].Message))
 				return fmt.Errorf("fine-tuning failed")
 			}
 
