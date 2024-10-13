@@ -626,6 +626,9 @@ func (i *AxolotlModelInstance) processInteraction(session *types.Session) error 
 				return fmt.Errorf("retrieving fine-tuning events: %w", err)
 			}
 			log.Info().Str("session_id", session.ID).Msgf("fine-tuning events: %d", len(events.Data))
+			for i, event := range events.Data {
+				log.Info().Int("i", i).Str("session_id", session.ID).Msgf("fine-tuning event: %s", event.Message)
+			}
 			status, err := i.client.RetrieveFineTuningJob(i.ctx, job.ID)
 			if err != nil {
 				if strings.Contains(err.Error(), "connection refused") {
