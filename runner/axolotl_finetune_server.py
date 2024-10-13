@@ -1,12 +1,15 @@
+import logging
 import pprint
 import signal
 import time
 import traceback
 import uuid
+from io import StringIO
 from typing import List, Optional
 
 import torch
 import transformers
+from accelerate.logging import get_logger
 from axolotl.cli import (
     check_accelerate_default_config,
     check_user_token,
@@ -20,6 +23,23 @@ from axolotl.utils.config import normalize_config
 from fastapi import BackgroundTasks, FastAPI, HTTPException
 from pydantic import BaseModel
 from transformers import GenerationConfig, TextStreamer
+
+
+class LevelFilter(logging.Filter):
+    def __init__(self, levels):
+        self.levels = levels
+
+    def filter(self, record):
+        return record.levelno in self.levels
+
+
+log_stream = StringIO()
+logging.basicConfig(stream=log_stream, level=logging.NOTSET)
+logging.getLogger().addFilter(
+    LevelFilter((logging.INFO, logging.WARNING, logging.ERROR))
+)
+
+AXO_LOG = get_logger("axolotl.train")
 
 # Create FastAPI app
 app = FastAPI()
@@ -131,7 +151,11 @@ def run_fine_tuning(
     except Exception as e:
         # Handle any errors that occur during the fine-tuning process
         fine_tuning_jobs[job_id].status = "failed"
-        add_fine_tuning_event(job_id, "error", f"Fine-tuning job failed: {str(e)}")
+        add_fine_tuning_event(
+            job_id,
+            "error",
+            f"Fine-tuning job failed: {str(e)}. {log_stream.getvalue()}",
+        )
         print(traceback.format_exc())
 
     signal.signal = orig_signal
