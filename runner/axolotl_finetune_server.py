@@ -34,9 +34,20 @@ class LevelFilter(logging.Filter):
 
 
 log_stream = StringIO()
+logging.basicConfig(stream=log_stream, level=logging.NOTSET)
+logging.getLogger().addFilter(
+    LevelFilter((logging.INFO, logging.WARNING, logging.ERROR))
+)
 AXO_LOGGER = get_logger("axolotl.train")
-print("PHIL", type(AXO_LOGGER))
-AXO_LOGGER.addHandler(logging.StreamHandler(log_stream))
+
+loggers = [logging.getLogger(name) for name in logging.root.manager.loggerDict]
+for logger in loggers:
+    if logger.name.startswith("axolotl"):
+        logger.addHandler(logging.StreamHandler(log_stream))
+        logger.setLevel(logging.DEBUG)
+
+for logger in loggers:
+    print(logger.name)
 
 # Create FastAPI app
 app = FastAPI()
