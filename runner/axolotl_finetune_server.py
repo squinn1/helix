@@ -39,12 +39,8 @@ logging.getLogger().addFilter(
     LevelFilter((logging.INFO, logging.WARNING, logging.ERROR))
 )
 
-AXO_LOG = get_logger("axolotl.train")
-
 # Create FastAPI app
 app = FastAPI()
-
-# Data models for Fine-Tuning API using Pydantic
 
 
 class Hyperparameters(BaseModel):
@@ -149,6 +145,7 @@ def run_fine_tuning(
         add_fine_tuning_event(job_id, "info", "Fine-tuning job completed successfully.")
 
     except Exception as e:
+        print(f"PHIL: {log_stream.getvalue()}")
         # Handle any errors that occur during the fine-tuning process
         fine_tuning_jobs[job_id].status = "failed"
         add_fine_tuning_event(
