@@ -626,9 +626,7 @@ func (i *AxolotlModelInstance) processInteraction(session *types.Session) error 
 				return fmt.Errorf("retrieving fine-tuning events: %w", err)
 			}
 			log.Info().Str("session_id", session.ID).Msgf("fine-tuning events: %d", len(events.Data))
-			for i, event := range events.Data {
-				log.Info().Int("i", i).Str("session_id", session.ID).Msgf("fine-tuning event: %s", event.Message)
-			}
+
 			status, err := i.client.RetrieveFineTuningJob(i.ctx, job.ID)
 			if err != nil {
 				if strings.Contains(err.Error(), "connection refused") {
@@ -664,8 +662,13 @@ func (i *AxolotlModelInstance) processInteraction(session *types.Session) error 
 				i.responseProcessor(session, types.Usage{}, "", true)
 				return nil
 			} else if status.Status == string(openai.RunStatusFailed) {
-				i.errorSession(session, fmt.Errorf("fine-tuning failed: %s", events.Data[len(events.Data)-1].Message))
-				return fmt.Errorf("fine-tuning failed")
+				if len(events.Data) > 0 {
+					i.errorSession(session, fmt.Errorf("fine-tuning failed: %s", events.Data[len(events.Data)-1].Message))
+					return fmt.Errorf("fine-tuning failed")
+				} else {
+					i.errorSession(session, fmt.Errorf("fine-tuning failed with no events"))
+					return fmt.Errorf("fine-tuning failed with no events")
+				}
 			}
 
 			i.responseProcessor(session, types.Usage{}, status.Status, false)
