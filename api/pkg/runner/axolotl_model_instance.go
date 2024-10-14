@@ -655,8 +655,10 @@ func (i *AxolotlModelInstance) processInteraction(session *types.Session) error 
 				// ignore errors, just capture latest whatever we can
 				var newReport TrainingStatusReport
 				err := json.Unmarshal([]byte(event.Message), &newReport)
-				if err != nil && newReport.Type == "training_progress_report" {
-					report = newReport
+				if err == nil {
+					if newReport.Type == "training_progress_report" {
+						report = newReport
+					}
 				}
 			}
 
