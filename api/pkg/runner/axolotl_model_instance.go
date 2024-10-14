@@ -634,7 +634,7 @@ func (i *AxolotlModelInstance) processInteraction(session *types.Session) error 
 				}
 				return fmt.Errorf("retrieving fine-tuning status: %w", err)
 			}
-			log.Info().Str("session_id", session.ID).Msgf("fine-tuning status: %s", status.Status)
+			log.Info().Str("session_id", session.ID).Interface("status", status).Msg("fine-tuning status")
 
 			// Report progress
 			var report TrainingStatusReport
@@ -661,7 +661,10 @@ func (i *AxolotlModelInstance) processInteraction(session *types.Session) error 
 					Progress:  report.Progress,
 				})
 			case "succeeded":
-				i.responseHandler(&types.RunnerTaskResponse{
+				if len(status.ResultFiles) < 1 {
+					return fmt.Errorf("fine-tuning succeeded but no result files")
+				}
+				i.taskResponseHandler(&types.RunnerTaskResponse{
 					Type:      types.WorkerTaskResponseTypeResult,
 					SessionID: session.ID,
 					Owner:     session.Owner,
