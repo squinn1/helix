@@ -110,13 +110,18 @@ class HelixCallback(callbacks.TrainerCallback):
         control: callbacks.TrainerControl,
         **kwargs,
     ):
-        report = TrainingProgressReport(
-            epoch=state.epoch,
-            loss=state.log_history["loss"],
-            grad_norm=state.log_history["grad_norm"],
-            learning_rate=state.log_history["learning_rate"],
-            progress=int(100 * state.epoch / state.num_train_epochs),
-        )
+        report = TrainingProgressReport()
+        if state.epoch is not None:
+            report.epoch = state.epoch
+            report.progress = (int(100 * state.epoch / state.num_train_epochs),)
+        if len(state.log_history) > 0:
+            hist = state.log_history[-1]
+            if "loss" in hist:
+                report.loss = hist["loss"]
+            if "grad_norm" in hist:
+                report.grad_norm = hist["grad_norm"]
+            if "learning_rate" in hist:
+                report.learning_rate = hist["learning_rate"]
         add_fine_tuning_event(args.run_name, "info", report.model_dump_json())
 
 
