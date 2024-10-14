@@ -666,7 +666,7 @@ func (i *AxolotlModelInstance) processInteraction(session *types.Session) error 
 					SessionID: session.ID,
 					Owner:     session.Owner,
 					Done:      true,
-					Progress:  report.Progress,
+					Progress:  100,
 					LoraDir:   status.ResultFiles[0],
 				})
 			case string(openai.RunStatusFailed):
