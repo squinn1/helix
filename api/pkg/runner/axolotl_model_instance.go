@@ -293,7 +293,7 @@ func (i *AxolotlModelInstance) taskResponseHandler(taskResponse *types.RunnerTas
 			}
 		}
 
-		// This is pretty sketchy, this is the only reason why it would take new work, but it's
+		// TODO(PHIL): This is pretty sketchy, this is the only reason why it would take new work, but it's
 		// buried within a handler that is only called when the session is done
 		i.currentSession = nil
 	}
@@ -679,14 +679,11 @@ func (i *AxolotlModelInstance) processInteraction(session *types.Session) error 
 				log.Info().Str("session_id", session.ID).Msg("fine-tuning complete")
 				// Signal the end of the stream
 				i.emitStreamDone(session)
-				// Send the last message containing full output
-				// TODO: set usage
-
 				// Check that there are results
 				if len(status.ResultFiles) > 0 {
 					session.LoraDir = status.ResultFiles[0]
 				}
-				i.responseProcessor(session, types.Usage{}, "", true)
+				i.responseProcessor(session, types.Usage{}, "", report.Progress, true)
 				return nil
 			} else if status.Status == string(openai.RunStatusFailed) {
 				if len(events.Data) > 0 {
@@ -696,7 +693,7 @@ func (i *AxolotlModelInstance) processInteraction(session *types.Session) error 
 				}
 			}
 
-			i.responseProcessor(session, types.Usage{}, status.Status, false)
+			i.responseProcessor(session, types.Usage{}, status.Status, report.Progress, false)
 		}
 	case types.SessionModeInference:
 		log.Info().Str("session_id", session.ID).Msg("processing inference interaction")
@@ -757,7 +754,7 @@ func (i *AxolotlModelInstance) processInteraction(session *types.Session) error 
 
 		// Signal the end of the stream
 		i.emitStreamDone(session)
-		i.responseProcessor(session, types.Usage{}, resp.Choices[0].Message.Content, true)
+		i.responseProcessor(session, types.Usage{}, resp.Choices[0].Message.Content, 100, true)
 	default:
 		return fmt.Errorf("unknown session mode: %s", session.Mode)
 	}
@@ -768,6 +765,7 @@ func (i *AxolotlModelInstance) responseProcessor(
 	session *types.Session,
 	usage types.Usage,
 	content string,
+	progress int,
 	done bool) {
 	if session == nil {
 		log.Error().Msgf("no current session")
@@ -790,6 +788,7 @@ func (i *AxolotlModelInstance) responseProcessor(
 		Message:       content,
 		Usage:         usage,
 		LoraDir:       session.LoraDir,
+		Progress:      progress,
 	}
 
 	if done {
