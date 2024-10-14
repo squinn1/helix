@@ -1,8 +1,9 @@
-import React, { createContext, useContext, ReactNode, useState, useCallback, useEffect } from 'react';
-import ReconnectingWebSocket from 'reconnecting-websocket';
-import { ISession, IWebsocketEvent, WEBSOCKET_EVENT_TYPE_WORKER_TASK_RESPONSE, WORKER_TASK_RESPONSE_TYPE_PROGRESS, IInteraction, ISessionChatRequest, SESSION_TYPE_TEXT, ISessionType } from '../types';
-import useAccount from '../hooks/useAccount';
 import { createParser, type ParsedEvent, type ReconnectInterval } from 'eventsource-parser';
+import React, { createContext, ReactNode, useCallback, useContext, useEffect, useState } from 'react';
+import ReconnectingWebSocket from 'reconnecting-websocket';
+import useAccount from '../hooks/useAccount';
+import useRouter from '../hooks/useRouter';
+import { IInteraction, ISession, ISessionChatRequest, ISessionType, IWebsocketEvent, WEBSOCKET_EVENT_TYPE_WORKER_TASK_RESPONSE, WORKER_TASK_RESPONSE_TYPE_PROGRESS } from '../types';
 
 interface NewInferenceParams {
   type: ISessionType;
@@ -34,6 +35,8 @@ export const useStreaming = (): StreamingContextType => {
 
 export const StreamingContextProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const account = useAccount();
+  const router = useRouter();
+  const sessionID = router.params.session_id
   const [currentResponses, setCurrentResponses] = useState<Map<string, Partial<IInteraction>>>(new Map());
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
   const [stepInfos, setStepInfos] = useState<Map<string, any[]>>(new Map());
@@ -41,12 +44,12 @@ export const StreamingContextProvider: React.FC<{ children: ReactNode }> = ({ ch
     if (!currentSessionId) return;
 
     if (parsedData.type as string === "step_info") {
-        const stepInfo = parsedData.step_info;
-        setStepInfos(prev => {
-            const currentSteps = prev.get(currentSessionId) || [];
-            const updatedSteps = [...currentSteps, stepInfo];
-            return new Map(prev).set(currentSessionId, updatedSteps);
-        });
+      const stepInfo = parsedData.step_info;
+      setStepInfos(prev => {
+        const currentSteps = prev.get(currentSessionId) || [];
+        const updatedSteps = [...currentSteps, stepInfo];
+        return new Map(prev).set(currentSessionId, updatedSteps);
+      });
     }
 
     if (parsedData.type === WEBSOCKET_EVENT_TYPE_WORKER_TASK_RESPONSE && parsedData.worker_task_response) {
@@ -67,6 +70,10 @@ export const StreamingContextProvider: React.FC<{ children: ReactNode }> = ({ ch
       });
     }
   }, [currentSessionId]);
+
+  useEffect(() => {
+    setCurrentSessionId(sessionID);
+  }, [sessionID]);
 
   useEffect(() => {
     if (!account.token || !currentSessionId) return;
@@ -167,11 +174,11 @@ export const StreamingContextProvider: React.FC<{ children: ReactNode }> = ({ ch
                 if (sessionData && sessionData.id) {
                   setCurrentSessionId(sessionData.id);
 
-                  if (parsedData.choices && parsedData.choices.length > 0) {                    
+                  if (parsedData.choices && parsedData.choices.length > 0) {
                     const messageSegment = parsedData.choices[0]?.delta?.content;
                     setCurrentResponses(prev => new Map(prev).set(sessionData!.id, { message: messageSegment || '', status: '', progress: 0 }));
-                  }                  
-                  
+                  }
+
                   if (!promiseResolved) {
                     promiseResolved = true;
                   }
