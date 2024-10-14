@@ -606,7 +606,7 @@ func (i *AxolotlModelInstance) processInteraction(session *types.Session) error 
 			TrainingFile:    combinedFile,
 			ValidationFile:  "",
 			Hyperparameters: &openai.Hyperparameters{},
-			Suffix:          "",
+			Suffix:          session.ID, // Use the suffix to identify the session and the final directory for the LORA
 		}
 
 		job, err := i.client.CreateFineTuningJob(i.ctx, req)

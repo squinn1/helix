@@ -38,6 +38,7 @@ class CreateFineTuningJobRequest(BaseModel):
     model: str
     validation_file: Optional[str] = None
     hyperparameters: Optional[Hyperparameters] = Hyperparameters()
+    suffix: str
 
 
 class FineTuningJob(BaseModel):
@@ -75,9 +76,19 @@ fine_tuning_jobs = {}
 fine_tuning_events = {}
 
 
-# Helper function to generate job ID
 def generate_job_id():
     return f"ftjob-{uuid.uuid4()}"
+
+
+def generate_model_id(model: str, org: str, suffix: str, job_id: str):
+    return f"ft:{model}:{org}:{suffix}:{job_id}"
+
+
+def suffix_from_model_id(job_id: str):
+    s = job_id.split(":")
+    if len(s) > 3:
+        return s[3]
+    return job_id
 
 
 # Function to run fine-tuning using Axolotl
@@ -106,7 +117,9 @@ def run_fine_tuning(
         parsed_cfg["datasets"][0]["roles"]["assistant"] = ["gpt"]
         parsed_cfg["datasets"][0]["roles"]["system"] = ["system"]
 
-        parsed_cfg["output_dir"] = f"/tmp/helix/results/{job_id}"
+        parsed_cfg["output_dir"] = (
+            f"/tmp/helix/results/{suffix_from_model_id(fine_tuning_jobs[job_id].fine_tuned_model)}"
+        )
 
         # # Use Alpaca dataset for testing
         # parsed_cfg["datasets"][0]["path"] = "mhenrichsen/alpaca_2k_test"
@@ -124,8 +137,8 @@ def run_fine_tuning(
 
         # Update job status to succeeded
         fine_tuning_jobs[job_id].status = "succeeded"
-        fine_tuning_jobs[job_id].fine_tuned_model = f"{model}-fine-tuned"
-        fine_tuning_jobs[job_id].result_files = [f"/tmp/helix/results/{job_id}"]
+        fine_tuning_jobs[job_id].fine_tuned_model = job_id
+        fine_tuning_jobs[job_id].result_files = [parsed_cfg["output_dir"]]
         add_fine_tuning_event(job_id, "info", "Fine-tuning job completed successfully.")
 
     except Exception as e:
@@ -162,6 +175,9 @@ async def create_fine_tuning_job(
         model=request.model,
         training_file=request.training_file,
         validation_file=request.validation_file,
+        fine_tuned_model=generate_model_id(
+            request.model, "helix", request.suffix, job_id
+        ),
         status="queued",
         created_at=int(time.time()),
         hyperparameters=request.hyperparameters,
