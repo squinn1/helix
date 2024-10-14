@@ -111,7 +111,6 @@ class HelixCallback(callbacks.TrainerCallback):
         control: callbacks.TrainerControl,
         **kwargs,
     ):
-        print(state)
         loss, grad_norm, learning_rate, epoch, progress = 0.0, 0.0, 0.0, 0.0, 0
         if state.epoch:
             epoch = state.epoch

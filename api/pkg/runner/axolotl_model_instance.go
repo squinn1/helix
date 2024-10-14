@@ -669,6 +669,7 @@ func (i *AxolotlModelInstance) processInteraction(session *types.Session) error 
 					Progress:  100,
 					LoraDir:   status.ResultFiles[0],
 				})
+				return nil
 			case string(openai.RunStatusFailed):
 				if len(events.Data) > 0 {
 					return fmt.Errorf("fine-tuning failed: %s", events.Data[len(events.Data)-1].Message)
