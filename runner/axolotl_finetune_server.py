@@ -1,10 +1,8 @@
-import logging
 import pprint
 import signal
 import time
 import traceback
 import uuid
-from io import StringIO
 from typing import List, Optional
 
 import torch
@@ -16,15 +14,25 @@ from axolotl.cli import (
     load_datasets,
 )
 from axolotl.common.cli import TrainerCliArgs, load_model_and_tokenizer
+from axolotl.core.trainer_builder import AxolotlTrainingArguments
 from axolotl.train import train
+from axolotl.utils import callbacks
+from axolotl.utils.callbacks import mlflow_
 from axolotl.utils.chat_templates import chat_templates
 from axolotl.utils.config import normalize_config
 from fastapi import BackgroundTasks, FastAPI, HTTPException
 from pydantic import BaseModel
 from transformers import GenerationConfig, TextStreamer
 
-# Create FastAPI app
 app = FastAPI()
+
+
+class TrainingProgressReport(BaseModel):
+    loss: float
+    grad_norm: float
+    learning_rate: float
+    epoch: float
+    progress: int
 
 
 class Hyperparameters(BaseModel):
@@ -91,6 +99,27 @@ def suffix_from_model_id(job_id: str):
     return job_id
 
 
+class HelixCallback(callbacks.TrainerCallback):
+    def __init__(self, axolotl_config_path):
+        self.axolotl_config_path = axolotl_config_path
+
+    def on_step_end(
+        self,
+        args: AxolotlTrainingArguments,
+        state: callbacks.TrainerState,
+        control: callbacks.TrainerControl,
+        **kwargs,
+    ):
+        report = TrainingProgressReport(
+            epoch=state.epoch,
+            loss=state.log_history["loss"],
+            grad_norm=state.log_history["grad_norm"],
+            learning_rate=state.log_history["learning_rate"],
+            progress=int(100 * state.epoch / state.num_train_epochs),
+        )
+        add_fine_tuning_event(args.run_name, "info", report.model_dump_json())
+
+
 # Function to run fine-tuning using Axolotl
 def run_fine_tuning(
     job_id: str, model: str, training_file: str, hyperparameters: Hyperparameters
@@ -117,13 +146,15 @@ def run_fine_tuning(
         parsed_cfg["datasets"][0]["roles"]["assistant"] = ["gpt"]
         parsed_cfg["datasets"][0]["roles"]["system"] = ["system"]
 
+        # Monkeypatch mlflow for our own purposes
+        parsed_cfg["use_mlflow"] = True
+        parsed_cfg["mlflow_run_name"] = job_id
+        callbacks.is_mlflow_available = lambda: True
+        mlflow_.SaveAxolotlConfigtoMlflowCallback = HelixCallback
+
         parsed_cfg["output_dir"] = (
             f"/tmp/helix/results/{suffix_from_model_id(fine_tuning_jobs[job_id].fine_tuned_model)}"
         )
-
-        parsed_cfg["num_epochs"] = hyperparameters.n_epochs
-        parsed_cfg["micro_batch_size"] = hyperparameters.batch_size
-        parsed_cfg["learning_rate"] = hyperparameters.learning_rate_multiplier
 
         pprint.pprint(parsed_cfg)
 
@@ -141,7 +172,7 @@ def run_fine_tuning(
         fine_tuning_jobs[job_id].result_files = [parsed_cfg["output_dir"]]
         add_fine_tuning_event(job_id, "info", "Fine-tuning job completed successfully.")
 
-    except Exception as e:
+    except Exception:
         # Handle any errors that occur during the fine-tuning process
         fine_tuning_jobs[job_id].status = "failed"
         add_fine_tuning_event(
@@ -154,7 +185,6 @@ def run_fine_tuning(
     signal.signal = orig_signal
 
 
-# Mock function to add events (this would be called when real fine-tuning happens)
 def add_fine_tuning_event(job_id: str, level: str, message: str):
     event = FineTuningEvent(
         id=str(uuid.uuid4()), created_at=int(time.time()), level=level, message=message

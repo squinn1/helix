@@ -2,6 +2,7 @@ package runner
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -24,6 +25,14 @@ import (
 var (
 	_ ModelInstance = &AxolotlModelInstance{}
 )
+
+type TrainingStatusReport struct {
+	Loss         float64 `json:"loss"`
+	GradNorm     float64 `json:"grad_norm"`
+	LearningRate float64 `json:"learning_rate"`
+	Epoch        float64 `json:"epoch"`
+	Progress     int     `json:"progress"`
+}
 
 type AxolotlModelInstanceConfig struct {
 	RunnerOptions RunnerOptions
@@ -639,16 +648,23 @@ func (i *AxolotlModelInstance) processInteraction(session *types.Session) error 
 			}
 			log.Info().Str("session_id", session.ID).Msgf("fine-tuning status: %s", status.Status)
 
-			// // Report progress
-			// err = i.responseHandler(&types.RunnerTaskResponse{
-			// 	Type:      types.WorkerTaskResponseTypeProgress,
-			// 	SessionID: session.ID,
-			// 	Progress: status.Status,
-			// })
-			// if err != nil {
-			// 	log.Error().Msgf("error writing event: %s", err.Error())
-			// 	return
-			// }
+			// Report progress
+			var report TrainingStatusReport
+			for _, event := range events.Data {
+				if status.Status == string(openai.RunStatusInProgress) {
+					// ignore errors, just capture latest whatever we can
+					json.Unmarshal([]byte(event.Message), &report)
+				}
+			}
+
+			err = i.responseHandler(&types.RunnerTaskResponse{
+				Type:      types.WorkerTaskResponseTypeProgress,
+				SessionID: session.ID,
+				Progress:  report.Progress,
+			})
+			if err != nil {
+				return fmt.Errorf("error writing progress event: %w", err)
+			}
 
 			if status.Status == "succeeded" {
 				log.Info().Str("session_id", session.ID).Msg("fine-tuning complete")
@@ -783,6 +799,7 @@ func (i *AxolotlModelInstance) emitStreamDone(session *types.Session) {
 		Owner:     session.Owner,
 		Message:   "",
 		Done:      true,
+		Progress:  100,
 	})
 	if err != nil {
 		log.Error().Msgf("error writing event: %s", err.Error())
