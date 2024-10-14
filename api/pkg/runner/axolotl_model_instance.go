@@ -662,7 +662,7 @@ func (i *AxolotlModelInstance) processInteraction(session *types.Session) error 
 				})
 			case "succeeded":
 				i.responseHandler(&types.RunnerTaskResponse{
-					Type:      types.WorkerTaskResponseTypeStream,
+					Type:      types.WorkerTaskResponseTypeResult,
 					SessionID: session.ID,
 					Owner:     session.Owner,
 					Done:      true,
