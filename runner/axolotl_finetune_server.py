@@ -111,7 +111,7 @@ class HelixCallback(callbacks.TrainerCallback):
         **kwargs,
     ):
         report = TrainingProgressReport()
-        if state.epoch is not None:
+        if state.epoch:
             report.epoch = state.epoch
             report.progress = (int(100 * state.epoch / state.num_train_epochs),)
         if len(state.log_history) > 0:
