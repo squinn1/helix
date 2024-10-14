@@ -121,9 +121,9 @@ def run_fine_tuning(
             f"/tmp/helix/results/{suffix_from_model_id(fine_tuning_jobs[job_id].fine_tuned_model)}"
         )
 
-        # # Use Alpaca dataset for testing
-        # parsed_cfg["datasets"][0]["path"] = "mhenrichsen/alpaca_2k_test"
-        # parsed_cfg["datasets"][0]["type"] = "alpaca"
+        parsed_cfg["num_epochs"] = hyperparameters.n_epochs
+        parsed_cfg["micro_batch_size"] = hyperparameters.batch_size
+        parsed_cfg["learning_rate"] = hyperparameters.learning_rate_multiplier
 
         pprint.pprint(parsed_cfg)
 

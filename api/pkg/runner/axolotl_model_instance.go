@@ -602,11 +602,15 @@ func (i *AxolotlModelInstance) processInteraction(session *types.Session) error 
 		log.Debug().Str("session_id", session.ID).Int64("file_size", fi.Size()).Msgf("combined file size")
 
 		req := openai.FineTuningJobRequest{
-			Model:           string(session.ModelName),
-			TrainingFile:    combinedFile,
-			ValidationFile:  "",
-			Hyperparameters: &openai.Hyperparameters{},
-			Suffix:          session.ID, // Use the suffix to identify the session and the final directory for the LORA
+			Model:          string(session.ModelName),
+			TrainingFile:   combinedFile,
+			ValidationFile: "",
+			Hyperparameters: &openai.Hyperparameters{
+				Epochs:                 20, // TODO: connect this up to the finetuning API when it is ready
+				LearningRateMultiplier: 0.0002,
+				BatchSize:              6,
+			},
+			Suffix: session.ID, // Use the suffix to identify the session and the final directory for the LORA
 		}
 
 		job, err := i.client.CreateFineTuningJob(i.ctx, req)
