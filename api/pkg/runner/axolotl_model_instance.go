@@ -657,6 +657,7 @@ func (i *AxolotlModelInstance) processInteraction(session *types.Session) error 
 				}
 			}
 
+			log.Debug().Str("session_id", session.ID).Interface("report", report).Msg("fine-tuning progress")
 			err = i.responseHandler(&types.RunnerTaskResponse{
 				Type:      types.WorkerTaskResponseTypeProgress,
 				SessionID: session.ID,
