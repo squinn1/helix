@@ -28,6 +28,7 @@ app = FastAPI()
 
 
 class TrainingProgressReport(BaseModel):
+    type: str = "training_progress_report"
     loss: float
     grad_norm: float
     learning_rate: float

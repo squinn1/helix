@@ -27,6 +27,7 @@ var (
 )
 
 type TrainingStatusReport struct {
+	Type         string  `json:"type"`
 	Loss         float64 `json:"loss"`
 	GradNorm     float64 `json:"grad_norm"`
 	LearningRate float64 `json:"learning_rate"`
@@ -654,7 +655,7 @@ func (i *AxolotlModelInstance) processInteraction(session *types.Session) error 
 				// ignore errors, just capture latest whatever we can
 				var newReport TrainingStatusReport
 				err := json.Unmarshal([]byte(event.Message), &newReport)
-				if err != nil {
+				if err != nil && newReport.Type == "training_progress_report" {
 					report = newReport
 				}
 			}
