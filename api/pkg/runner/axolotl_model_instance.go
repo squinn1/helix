@@ -665,15 +665,6 @@ func (i *AxolotlModelInstance) processInteraction(session *types.Session) error 
 			}
 
 			log.Debug().Str("session_id", session.ID).Interface("report", report).Msg("fine-tuning progress")
-			err = i.responseHandler(&types.RunnerTaskResponse{
-				Type:      types.WorkerTaskResponseTypeProgress,
-				SessionID: session.ID,
-				Progress:  report.Progress,
-				Status:    status.Status,
-			})
-			if err != nil {
-				return fmt.Errorf("error writing progress event: %w", err)
-			}
 
 			if status.Status == "succeeded" {
 				log.Info().Str("session_id", session.ID).Msg("fine-tuning complete")
