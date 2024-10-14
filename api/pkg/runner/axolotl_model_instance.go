@@ -651,9 +651,11 @@ func (i *AxolotlModelInstance) processInteraction(session *types.Session) error 
 			// Report progress
 			var report TrainingStatusReport
 			for _, event := range events.Data {
-				if status.Status == string(openai.RunStatusInProgress) {
-					// ignore errors, just capture latest whatever we can
-					json.Unmarshal([]byte(event.Message), &report)
+				// ignore errors, just capture latest whatever we can
+				var newReport TrainingStatusReport
+				err := json.Unmarshal([]byte(event.Message), &newReport)
+				if err != nil {
+					report = newReport
 				}
 			}
 
