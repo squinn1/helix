@@ -293,6 +293,8 @@ func (i *AxolotlModelInstance) taskResponseHandler(taskResponse *types.RunnerTas
 			}
 		}
 
+		// This is pretty sketchy, this is the only reason why it would take new work, but it's
+		// buried within a handler that is only called when the session is done
 		i.currentSession = nil
 	}
 
@@ -667,6 +669,7 @@ func (i *AxolotlModelInstance) processInteraction(session *types.Session) error 
 				Type:      types.WorkerTaskResponseTypeProgress,
 				SessionID: session.ID,
 				Progress:  report.Progress,
+				Status:    status.Status,
 			})
 			if err != nil {
 				return fmt.Errorf("error writing progress event: %w", err)

@@ -614,8 +614,10 @@ func (r *Runner) createModelInstance(ctx context.Context, initialSession *types.
 		modelInstance, err = NewAxolotlModelInstance(
 			r.Ctx,
 			&ModelInstanceConfig{
-				InitialSession:  initialSession,
-				ResponseHandler: r.handleWorkerResponse,
+				InitialSession: initialSession,
+				ResponseHandler: func(res *types.RunnerTaskResponse) error {
+					return r.handleWorkerResponse(res)
+				},
 				GetNextSession: func() (*types.Session, error) {
 					r.nextGlobalRequestMutex.Lock()
 					defer r.nextGlobalRequestMutex.Unlock()
@@ -804,6 +806,7 @@ func (r *Runner) handleWorkerResponse(res *types.RunnerTaskResponse) error {
 		log.Info().Msgf("🟠 Sending task response %s %+v", res.SessionID, res)
 		return r.postWorkerResponseToApi(res)
 	case types.WorkerTaskResponseTypeProgress, types.WorkerTaskResponseTypeStream:
+		log.Info().Msgf("🟠 Streaming task progress %s %+v", res.SessionID, res)
 		// streaming updates it's a websocket event
 		return r.sendWorkerResponseToWebsocket(res)
 	default:
