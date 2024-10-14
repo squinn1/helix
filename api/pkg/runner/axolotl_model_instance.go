@@ -622,7 +622,6 @@ func (i *AxolotlModelInstance) processInteraction(session *types.Session) error 
 				if strings.Contains(err.Error(), "connection refused") {
 					continue
 				}
-				i.errorSession(session, err)
 				return fmt.Errorf("retrieving fine-tuning events: %w", err)
 			}
 			log.Info().Str("session_id", session.ID).Msgf("fine-tuning events: %d", len(events.Data))
@@ -632,7 +631,6 @@ func (i *AxolotlModelInstance) processInteraction(session *types.Session) error 
 				if strings.Contains(err.Error(), "connection refused") {
 					continue
 				}
-				i.errorSession(session, err)
 				return fmt.Errorf("retrieving fine-tuning status: %w", err)
 			}
 			log.Info().Str("session_id", session.ID).Msgf("fine-tuning status: %s", status.Status)
@@ -663,10 +661,8 @@ func (i *AxolotlModelInstance) processInteraction(session *types.Session) error 
 				return nil
 			} else if status.Status == string(openai.RunStatusFailed) {
 				if len(events.Data) > 0 {
-					i.errorSession(session, fmt.Errorf("fine-tuning failed: %s", events.Data[len(events.Data)-1].Message))
-					return fmt.Errorf("fine-tuning failed")
+					return fmt.Errorf("fine-tuning failed: %s", events.Data[len(events.Data)-1].Message)
 				} else {
-					i.errorSession(session, fmt.Errorf("fine-tuning failed with no events"))
 					return fmt.Errorf("fine-tuning failed with no events")
 				}
 			}
@@ -727,7 +723,6 @@ func (i *AxolotlModelInstance) processInteraction(session *types.Session) error 
 			Messages: messages,
 		})
 		if err != nil {
-			i.errorSession(session, fmt.Errorf("error creating chat completion:  %w", err))
 			return fmt.Errorf("creating chat completion: %w", err)
 		}
 
