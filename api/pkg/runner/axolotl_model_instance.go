@@ -527,21 +527,6 @@ func (i *AxolotlModelInstance) Stop() error {
 	return nil
 }
 
-func (i *AxolotlModelInstance) addJobToHistory(session *types.Session) error {
-	summary, err := data.GetSessionSummary(session)
-	if err != nil {
-		return err
-	}
-
-	// put the job at the start of the array
-	i.jobHistory = append([]*types.SessionSummary{summary}, i.jobHistory...)
-	if len(i.jobHistory) > i.runnerOptions.JobHistoryBufferSize {
-		i.jobHistory = i.jobHistory[:len(i.jobHistory)-1]
-	}
-
-	return nil
-}
-
 func (i *AxolotlModelInstance) GetState() (*types.ModelInstanceState, error) {
 	if i.initialSession == nil {
 		return nil, fmt.Errorf("no initial session")
@@ -666,30 +651,37 @@ func (i *AxolotlModelInstance) processInteraction(session *types.Session) error 
 
 			log.Debug().Str("session_id", session.ID).Interface("report", report).Msg("fine-tuning progress")
 
-			if status.Status == "succeeded" {
-				log.Info().Str("session_id", session.ID).Msg("fine-tuning complete")
-				// Signal the end of the stream
-				i.emitStreamDone(session)
-				// Check that there are results
-				if len(status.ResultFiles) > 0 {
-					session.LoraDir = status.ResultFiles[0]
-				}
-				i.responseProcessor(session, types.Usage{}, "", report.Progress, true)
-				return nil
-			} else if status.Status == string(openai.RunStatusFailed) {
+			switch status.Status {
+			case "running":
+				i.responseHandler(&types.RunnerTaskResponse{
+					Type:      types.WorkerTaskResponseTypeProgress,
+					SessionID: session.ID,
+					Owner:     session.Owner,
+					Done:      false,
+					Progress:  report.Progress,
+				})
+			case "succeeded":
+				i.responseHandler(&types.RunnerTaskResponse{
+					Type:      types.WorkerTaskResponseTypeStream,
+					SessionID: session.ID,
+					Owner:     session.Owner,
+					Done:      true,
+					Progress:  report.Progress,
+					LoraDir:   status.ResultFiles[0],
+				})
+			case string(openai.RunStatusFailed):
 				if len(events.Data) > 0 {
 					return fmt.Errorf("fine-tuning failed: %s", events.Data[len(events.Data)-1].Message)
 				} else {
 					return fmt.Errorf("fine-tuning failed with no events")
 				}
+			default:
+				return fmt.Errorf("unknown fine-tuning status: %s", status.Status)
 			}
-
-			i.responseProcessor(session, types.Usage{}, status.Status, report.Progress, false)
 		}
 	case types.SessionModeInference:
 		log.Info().Str("session_id", session.ID).Msg("processing inference interaction")
 
-		// TODO: Get the LORA dir from the session
 		downloadedLoraDir := ""
 		if session.LoraDir != "" {
 			downloadedLoraDir = "/tmp/helix/results/" + session.ID
@@ -698,8 +690,6 @@ func (i *AxolotlModelInstance) processInteraction(session *types.Session) error 
 				return fmt.Errorf("downloading LORA dir: %w", err)
 			}
 		}
-
-		// TODO: Make sure that LORA dir is accessible to the server
 
 		// Convert session interactions to chat completion messages
 		var messages []openai.ChatCompletionMessage
@@ -744,64 +734,27 @@ func (i *AxolotlModelInstance) processInteraction(session *types.Session) error 
 		}
 
 		// Signal the end of the stream
-		i.emitStreamDone(session)
-		i.responseProcessor(session, types.Usage{}, resp.Choices[0].Message.Content, 100, true)
+		assistantInteraction, err := data.GetAssistantInteraction(session)
+		if err != nil {
+			return fmt.Errorf("getting assistant interaction: %w", err)
+		}
+
+		i.taskResponseHandler(&types.RunnerTaskResponse{
+			Type:          types.WorkerTaskResponseTypeResult,
+			SessionID:     session.ID,
+			InteractionID: assistantInteraction.ID,
+			Owner:         session.Owner,
+			Done:          true,
+			Message:       resp.Choices[0].Message.Content,
+			Usage: types.Usage{
+				TotalTokens:      resp.Usage.TotalTokens,
+				PromptTokens:     resp.Usage.PromptTokens,
+				CompletionTokens: resp.Usage.CompletionTokens,
+				DurationMs:       int64(time.Since(time.UnixMilli(resp.Created)).Milliseconds()),
+			},
+		})
 	default:
 		return fmt.Errorf("unknown session mode: %s", session.Mode)
 	}
 	return nil
-}
-
-func (i *AxolotlModelInstance) responseProcessor(
-	session *types.Session,
-	usage types.Usage,
-	content string,
-	progress int,
-	done bool) {
-	if session == nil {
-		log.Error().Msgf("no current session")
-		return
-	}
-
-	var err error
-
-	assistantInteraction, err := data.GetAssistantInteraction(session)
-	if err != nil {
-		log.Error().Msgf("error getting assistant interaction: %s", err.Error())
-		return
-	}
-
-	resp := &types.RunnerTaskResponse{
-		SessionID:     session.ID,
-		InteractionID: assistantInteraction.ID,
-		Owner:         session.Owner,
-		Done:          done,
-		Message:       content,
-		Usage:         usage,
-		LoraDir:       session.LoraDir,
-		Progress:      progress,
-	}
-
-	if done {
-		resp.Type = types.WorkerTaskResponseTypeResult
-	} else {
-		resp.Type = types.WorkerTaskResponseTypeStream
-	}
-
-	i.taskResponseHandler(resp)
-}
-
-func (i *AxolotlModelInstance) emitStreamDone(session *types.Session) {
-	err := i.responseHandler(&types.RunnerTaskResponse{
-		Type:      types.WorkerTaskResponseTypeStream,
-		SessionID: session.ID,
-		Owner:     session.Owner,
-		Message:   "",
-		Done:      true,
-		Progress:  100,
-	})
-	if err != nil {
-		log.Error().Msgf("error writing event: %s", err.Error())
-		return
-	}
 }
