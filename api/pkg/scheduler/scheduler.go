@@ -18,9 +18,11 @@ import (
 // The underlying workload management is handled by the WorkloadAllocator interface.
 type Scheduler interface {
 	Schedule(request *Workload) error
-	Release(id string) error
+	Begin(requestID string) error
+	Release(requestID string) error
 	WorkForRunner(id string, workType WorkloadType, newWorkOnly bool, model string) (*Workload, error)
 	UpdateRunner(props *types.RunnerState)
+	SlotsForRunner(runnerID string) map[uuid.UUID]*Workload
 }
 
 // scheduler is a struct implementing the Scheduler interface.
@@ -59,7 +61,7 @@ func NewScheduler(cfg *config.ServerConfig) *scheduler {
 		allocator:         allocator,
 		cluster:           cluster,
 		workStore:         xsync.NewMapOf[uuid.UUID, *Workload](),
-		placementStrategy: schedStratFunc, // TODO: Make this configurable.
+		placementStrategy: schedStratFunc,
 	}
 
 	// Start a goroutine to log the current state of the scheduler.
@@ -124,6 +126,12 @@ func (s *scheduler) Schedule(work *Workload) (err error) {
 			return fmt.Errorf("unable to place work on any runner: %w", err)
 		}
 
+		// Figure out if we have to kill a slot to make room for the new one.
+		err = DeleteMostStaleStrategy(s.allocator, bestRunnerID, s.cluster.TotalMemory(bestRunnerID), work.Model().GetMemoryRequirements(work.Mode()))
+		if err != nil {
+			return fmt.Errorf("unable to delete stale slots: %w", err)
+		}
+
 		// Create an allocate slot
 		slot, err = s.allocator.AllocateNewSlot(bestRunnerID, work)
 		if err != nil {
@@ -145,12 +153,12 @@ func (s *scheduler) Schedule(work *Workload) (err error) {
 
 // Release frees the resources associated with a specific scheduled request.
 // It finds the request by its ID, releases the allocated slot, and removes the associated work from the store.
-func (s *scheduler) Release(id string) error {
+func (s *scheduler) Release(requestID string) error {
 	// Find the slot ID associated with the request.
-	slotID, ok := s.find(id)
+	slotID, ok := s.find(requestID)
 	if !ok {
 		// If the request is not found, return an error.
-		return fmt.Errorf("request not found: %s", id)
+		return fmt.Errorf("request not found: %s", requestID)
 	}
 
 	// Release the resources allocated to the slot.
@@ -162,6 +170,23 @@ func (s *scheduler) Release(id string) error {
 
 	// Remove the work associated with the slot from the store.
 	s.workStore.Delete(slotID)
+
+	return nil
+}
+
+func (s *scheduler) Begin(requestID string) error {
+	// Find the slot ID associated with the request.
+	slotID, ok := s.find(requestID)
+	if !ok {
+		// If the request is not found, return an error.
+		return fmt.Errorf("request not found: %s", requestID)
+	}
+
+	// Set the slot as started
+	err := s.allocator.StartSlot(slotID)
+	if err != nil {
+		return fmt.Errorf("problem starting slot: %w", err)
+	}
 
 	return nil
 }
@@ -213,7 +238,7 @@ func (s *scheduler) WorkForRunner(id string, workType WorkloadType, newWorkOnly 
 			if newWorkOnly && !slot.IsNew() {
 				continue // Work is not new, ignore it.
 			}
-			slot.Start() // Mark the work in the slot as started.
+			slot.Active() // Mark the work in the slot as started.
 			return work, nil
 		}
 	}
@@ -221,12 +246,35 @@ func (s *scheduler) WorkForRunner(id string, workType WorkloadType, newWorkOnly 
 	return nil, nil
 }
 
+// Return a list of scheduled workloads for the current runner.
+func (s *scheduler) SlotsForRunner(runnerID string) map[uuid.UUID]*Workload {
+	internalSlots := s.allocator.RunnerSlots(runnerID)
+	slots := make(map[uuid.UUID]*Workload, len(internalSlots))
+	for _, slot := range internalSlots {
+		// Default to empty slot
+		slots[slot.ID] = nil
+		// If the slot is active, then try to ge the work
+		if slot.IsScheduled() {
+			// If the workstore has work, then add it to the slots map.
+			work, ok := s.workStore.Load(slot.ID)
+			if ok {
+				slots[slot.ID] = work
+				// TODO(PHIL): This marks the slot as active immediately. I.e. this work is sent
+				// at most once.
+				slot.Active()
+			}
+		}
+	}
+
+	return slots
+}
+
 // UpdateRunner updates the state of a runner and reconciles its slots with the allocator's records.
 func (s *scheduler) UpdateRunner(props *types.RunnerState) {
 	// Update the runner's state in the cluster.
 	s.cluster.UpdateRunner(props)
 	// Reconcile the runner's slots with the allocator's records.
-	s.allocator.ReconcileSlots(props)
+	// s.allocator.ReconcileSlots(props)
 }
 
 // find searches for the slot ID associated with a given workload ID.

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"time"
 
+	"github.com/google/uuid"
 	openai "github.com/sashabaranov/go-openai"
 	"gorm.io/datatypes"
 )
@@ -740,6 +741,7 @@ type RunnerState struct {
 	ModelInstances      []*ModelInstanceState `json:"model_instances"`
 	SchedulingDecisions []string              `json:"scheduling_decisions"`
 	Version             string                `json:"version"`
+	Slots               []RunnerSlot          `json:"slots"`
 }
 
 type DashboardData struct {
@@ -1423,4 +1425,29 @@ type LLMCall struct {
 	PromptTokens     int64
 	CompletionTokens int64
 	TotalTokens      int64
+}
+
+type PatchRunnerSlots struct {
+	Data []RunnerSlot `json:"data"`
+}
+
+type RunnerSlot struct {
+	ID         uuid.UUID            `json:"id"`
+	Attributes RunnerSlotAttributes `json:"attributes"`
+}
+
+type WorkloadType string
+
+const (
+	WorkloadTypeLLMInferenceRequest WorkloadType = "llm"
+	WorkloadTypeSession             WorkloadType = "session"
+)
+
+type RunnerSlotAttributes struct {
+	Workload *RunnerWorkload `json:"workload,omitempty"`
+}
+
+type RunnerWorkload struct {
+	LLMInferenceRequest *RunnerLLMInferenceRequest
+	Session             *Session
 }

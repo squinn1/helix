@@ -15,11 +15,13 @@ import (
 type WorkloadAllocator interface {
 	AllocateNewSlot(runnerID string, req *Workload) (*Slot, error)
 	AllocateSlot(slotID uuid.UUID, req *Workload) error
+	StartSlot(slotID uuid.UUID) error
 	ReleaseSlot(slotID uuid.UUID) error
 	DeadSlots(deadRunnerIDs []string) []*Slot
 	WarmSlots(req *Workload) []*Slot
 	RunnerSlots(id string) []*Slot
 	ReconcileSlots(props *types.RunnerState) error
+	DeleteSlot(slotID uuid.UUID)
 }
 
 // TimeoutFunc defines a function type that determines if a runner has timed out based on the last activity.
@@ -91,6 +93,30 @@ func (a *allocator) AllocateNewSlot(runnerID string, req *Workload) (*Slot, erro
 
 	// Schedule and store the new slot.
 	return slot, a.AllocateSlot(slot.ID, req)
+}
+
+// StartSlot marks scheduled work as in progress
+func (a *allocator) StartSlot(slotID uuid.UUID) error {
+	// Find the slot.
+	slot, ok := a.slots.Load(slotID)
+	if !ok {
+		return fmt.Errorf("slot not found: %s", slotID.String())
+	}
+
+	// Log something when it first becomes active
+	if slot.IsScheduled() {
+		log.Trace().
+			Str("runner_id", slot.RunnerID).
+			Str("slot_id", slot.ID.String()).
+			Str("model_name", slot.ModelName().String()).
+			Uint64("total_memory", slot.Memory()).
+			Msg("starting slot")
+	}
+
+	// Always mark the slot as active
+	slot.Active()
+
+	return nil
 }
 
 // ReleaseSlot frees the resources allocated to a specific slot.
@@ -214,28 +240,43 @@ func (a *allocator) WarmSlots(req *Workload) []*Slot {
 	cosyWarm := make([]*Slot, 0, a.slots.Size())
 
 	a.slots.Range(func(id uuid.UUID, slot *Slot) bool {
+		l := log.With().
+			Str("slot_id", id.String()).
+			Str("req_model_name", req.ModelName().String()).
+			Str("slot_model_name", slot.ModelName().String()).
+			Str("req_inference_runtime", req.ModelName().InferenceRuntime().String()).
+			Str("slot_inference_runtime", slot.ModelName().InferenceRuntime().String()).
+			Str("req_lora_dir", req.LoraDir()).
+			Str("slot_lora_dir", slot.LoraDir()).
+			Logger()
+
 		// If it's not the same model name, skip
 		if slot.ModelName() != req.ModelName() {
+			l.Trace().Msg("skipping warm slot, model name mismatch")
 			return true
 		}
 
 		// If it's not the same runtime, skip
 		if slot.ModelName().InferenceRuntime() != req.ModelName().InferenceRuntime() {
+			l.Trace().Msg("skipping warm slot, inference runtime mismatch")
 			return true
 		}
 
 		// If the slot is already running another job, skip
 		if slot.IsActive() {
+			l.Trace().Msg("skipping warm slot, already active")
 			return true
 		}
 
 		// If the slot is scheduled to run another job, skip
 		if slot.IsScheduled() {
+			l.Trace().Msg("skipping warm slot, already scheduled")
 			return true
 		}
 
 		// If it doesn't have the right LoraDir then skip
 		if slot.LoraDir() != req.LoraDir() {
+			l.Trace().Msg("skipping warm slot, LoraDir mismatch")
 			return true
 		}
 
@@ -274,4 +315,8 @@ func (a *allocator) DeadSlots(deadRunnerIDs []string) []*Slot {
 	}
 
 	return deadSlots
+}
+
+func (a *allocator) DeleteSlot(slotID uuid.UUID) {
+	a.slots.Delete(slotID)
 }
