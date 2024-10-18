@@ -460,6 +460,8 @@ func (r *Runner) pollSlots(ctx context.Context) error {
 			continue
 		}
 
+		l.Debug().Str("slot_id", slot.ID.String()).Msg("slot has workload")
+
 		// If there is work, then parse the RunnerWorkload into a Workload
 		var work *scheduler.Workload
 		if slot.Attributes.Workload.LLMInferenceRequest != nil {

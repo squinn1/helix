@@ -273,7 +273,8 @@ func (s *scheduler) SlotsForRunner(runnerID string) map[uuid.UUID]*Workload {
 func (s *scheduler) UpdateRunner(props *types.RunnerState) {
 	// Update the runner's state in the cluster.
 	s.cluster.UpdateRunner(props)
-	// Reconcile the runner's slots with the allocator's records.
+
+	// TODO: Reconcile the runner's slots with the allocator's records.
 	// s.allocator.ReconcileSlots(props)
 }
 

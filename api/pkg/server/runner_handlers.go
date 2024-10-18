@@ -22,6 +22,18 @@ func (apiServer *HelixAPIServer) getRunnerSlots(res http.ResponseWriter, req *ht
 		return nil, fmt.Errorf("missing runner id")
 	}
 
+	log.Debug().Str("runner_id", runnerID).Msg("Getting slots for runner")
+	// TODO(PHIL): Temporarily shift the queue to schedule all the work until we take control of it
+	_, err := apiServer.Controller.ShiftSessionQueue(req.Context(), types.SessionFilter{}, runnerID)
+	if err != nil {
+		return nil, err
+	}
+	// TODO(PHIL): Temporarily shift the llm queue to schedule all the work until we take control of it
+	_, err = apiServer.inferenceServer.GetNextLLMInferenceRequest(req.Context(), types.InferenceRequestFilter{}, runnerID)
+	if err != nil {
+		return nil, err
+	}
+
 	internalSlots := apiServer.scheduler.SlotsForRunner(runnerID)
 
 	// Convert the slots to a PatchRunnerSlots object.
@@ -219,6 +231,8 @@ func (apiServer *HelixAPIServer) handleRunnerMetrics(res http.ResponseWriter, re
 	if err != nil {
 		return nil, err
 	}
+
+	log.Trace().Interface("runner_state", runnerState).Msg("received runner metrics")
 
 	apiServer.scheduler.UpdateRunner(runnerState)
 
