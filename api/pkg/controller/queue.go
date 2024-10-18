@@ -149,8 +149,7 @@ func (c *Controller) loadSessionQueues(ctx context.Context) error {
 	return nil
 }
 
-// TODO: remove
-func (c *Controller) ShiftSessionQueue(ctx context.Context, filter types.SessionFilter, runnerID string) (*types.Session, error) {
+func (c *Controller) ScheduleQueue(ctx context.Context) error {
 	c.sessionQueueMtx.Lock()
 	defer c.sessionQueueMtx.Unlock()
 
@@ -160,7 +159,7 @@ func (c *Controller) ShiftSessionQueue(ctx context.Context, filter types.Session
 		log.Info().Str("session_id", session.ID).Msg("scheduling session")
 		work, err := scheduler.NewSessonWorkload(session)
 		if err != nil {
-			return nil, fmt.Errorf("creating session workload: %w", err)
+			return fmt.Errorf("creating session workload: %w", err)
 		}
 
 		err = c.scheduler.Schedule(work)
@@ -189,6 +188,18 @@ func (c *Controller) ShiftSessionQueue(ctx context.Context, filter types.Session
 	}
 	c.sessionQueue = c.sessionQueue[taken:]
 	c.sessionSummaryQueue = c.sessionSummaryQueue[taken:]
+	return nil
+}
+
+// TODO: remove
+func (c *Controller) ShiftSessionQueue(ctx context.Context, filter types.SessionFilter, runnerID string) (*types.Session, error) {
+	err := c.ScheduleQueue(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("error scheduling queue: %w", err)
+	}
+
+	c.sessionQueueMtx.Lock()
+	defer c.sessionQueueMtx.Unlock()
 
 	// Default to requesting warm work
 	newWorkOnly := false

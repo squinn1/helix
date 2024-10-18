@@ -20,6 +20,7 @@ const schedulingDecisionHistorySize = 10
 type HelixServer interface {
 	// GetNextLLMInferenceRequest is called by the HTTP handler  to get the next LLM inference request to process for the runner
 	GetNextLLMInferenceRequest(ctx context.Context, filter types.InferenceRequestFilter, runnerID string) (*types.RunnerLLMInferenceRequest, error)
+	ScheduleQueue(ctx context.Context) error
 	// ProcessRunnerResponse is called by the HTTP handler when the runner sends a response over the websocket
 	ProcessRunnerResponse(ctx context.Context, resp *types.RunnerLLMInferenceResponse) error
 	// GetSchedulingDecision returns the last scheduling decisions made by the server, used for the dashboar
@@ -56,9 +57,7 @@ func (c *InternalHelixServer) ListModels(ctx context.Context) ([]model.OpenAIMod
 	return ListModels(ctx)
 }
 
-// TODO: move logic from controller and other places. This method would be called directly from the runner
-// handler to get the next session. Pubsub is handled internally within this package
-func (c *InternalHelixServer) GetNextLLMInferenceRequest(ctx context.Context, filter types.InferenceRequestFilter, runnerID string) (*types.RunnerLLMInferenceRequest, error) {
+func (c *InternalHelixServer) ScheduleQueue(ctx context.Context) error {
 	c.queueMu.Lock()
 	defer c.queueMu.Unlock()
 
@@ -105,6 +104,19 @@ func (c *InternalHelixServer) GetNextLLMInferenceRequest(ctx context.Context, fi
 	}
 	// Clear processed queue
 	c.queue = c.queue[taken:]
+	return nil
+}
+
+// TODO: move logic from controller and other places. This method would be called directly from the runner
+// handler to get the next session. Pubsub is handled internally within this package
+func (c *InternalHelixServer) GetNextLLMInferenceRequest(ctx context.Context, filter types.InferenceRequestFilter, runnerID string) (*types.RunnerLLMInferenceRequest, error) {
+	err := c.ScheduleQueue(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("error scheduling queue: %w", err)
+	}
+
+	c.queueMu.Lock()
+	defer c.queueMu.Unlock()
 
 	// Default to requesting warm work
 	newWorkOnly := false

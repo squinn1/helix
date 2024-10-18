@@ -304,6 +304,10 @@ export interface IModelInstanceState {
   status?: string,
 }
 
+export interface ISlot {
+  id: string,
+}
+
 export interface IRunnerState {
   id: string,
   created: string,
@@ -330,7 +334,7 @@ export interface ISessionFilter {
   older?: string,
 }
 
-export interface  IGlobalSchedulingDecision {
+export interface IGlobalSchedulingDecision {
   created: string,
   runner_id: string,
   session_id: string,
@@ -460,7 +464,7 @@ export interface IToolGptScriptConfig {
 
 export interface IToolZapierConfig {
   api_key?: string,
-  model?: string, 
+  model?: string,
   max_iterations?: number,
 }
 
@@ -485,7 +489,7 @@ export interface ITool {
 }
 
 export interface IKeyPair {
-	type: string,
+  type: string,
   private_key: string,
   public_key: string,
 }
@@ -621,7 +625,7 @@ export interface IAppGithubConfigUpdate {
   hash: string,
   error: string,
 }
- 
+
 export interface IAppGithubConfig {
   repo: string,
   hash: string,
@@ -686,7 +690,7 @@ export interface ICreateSessionConfig {
   activeToolIDs: string[],
   finetuneEnabled: boolean,
   ragEnabled: boolean,
-  ragDistanceFunction: IRagDistanceFunction, 
+  ragDistanceFunction: IRagDistanceFunction,
   ragThreshold: number,
   ragResultsCount: number,
   ragChunkSize: number,
