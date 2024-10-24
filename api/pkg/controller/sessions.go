@@ -786,97 +786,16 @@ func (c *Controller) ErrorSession(session *types.Session, sessionErr error) {
 // in which case let's replace it at it's current position
 // we mark the session as "preparing" here to give text fine tuning
 // a chance to sort itself out in the background
-func (c *Controller) AddSessionToQueue(session *types.Session) {
-	sessionSummary, err := data.GetSessionSummary(session)
+func (c *Controller) AddSessionToQueue(session *types.Session) error {
+	work, err := scheduler.NewSessionWorkload(session)
 	if err != nil {
-		log.Error().Msgf("error getting session summary: %s", err.Error())
-		return
+		return fmt.Errorf("error creating workload: %w", err)
 	}
-
-	c.sessionQueueMtx.Lock()
-	defer c.sessionQueueMtx.Unlock()
-
-	existing := false
-	newQueue := []*types.Session{}
-	newSummaryQueue := []*types.SessionSummary{}
-
-	// what is the latest priority session in the queue?
-	// if we are a priority session then we will get put after that one
-	// if there are no priority sessions in the queue and we are - then we go first
-	lastPriorityIndex := -1
-	for i, existingSession := range c.sessionQueue {
-		if existingSession.ID == session.ID {
-			// the session we are updating is already in the queue!
-			newQueue = append(newQueue, session)
-			newSummaryQueue = append(newSummaryQueue, sessionSummary)
-			existing = true
-		} else {
-			// this is another session we just want to copy it over
-			// we use the index to copy so it's the same for the summary and the actual session
-			newQueue = append(newQueue, c.sessionQueue[i])
-			newSummaryQueue = append(newSummaryQueue, c.sessionSummaryQueue[i])
-		}
-		if existingSession.Metadata.Priority {
-			lastPriorityIndex = i
-		}
+	err = c.scheduler.Enqueue(work)
+	if err != nil {
+		return fmt.Errorf("error enqueuing work: %w", err)
 	}
-	if !existing {
-		if session.Metadata.Priority {
-			if lastPriorityIndex == -1 {
-				// prepend the session to the start of the queue
-				newQueue = append([]*types.Session{session}, newQueue...)
-				newSummaryQueue = append([]*types.SessionSummary{sessionSummary}, newSummaryQueue...)
-			} else {
-				// insert the session into newQueue just after the lastPriorityIndex
-				newQueue = append(newQueue[:lastPriorityIndex+1], append([]*types.Session{session}, newQueue[lastPriorityIndex+1:]...)...)
-				newSummaryQueue = append(newSummaryQueue[:lastPriorityIndex+1], append([]*types.SessionSummary{sessionSummary}, newSummaryQueue[lastPriorityIndex+1:]...)...)
-			}
-		} else {
-			// we did not find the session already in the queue
-			newQueue = append(newQueue, session)
-			newSummaryQueue = append(newSummaryQueue, sessionSummary)
-		}
-	}
-
-	c.sessionQueue = newQueue
-	c.sessionSummaryQueue = newSummaryQueue
-
-	// TODO(PHIL): Take control of the queue
-	// Schedule all new sessions in the queue, until we run out of runners
-	taken := 0
-	for _, session := range c.sessionQueue {
-		log.Info().Str("session_id", session.ID).Msg("scheduling session")
-		work, err := scheduler.NewSessonWorkload(session)
-		if err != nil {
-			log.Err(err).Msg("error creating session workload")
-		}
-
-		err = c.scheduler.Schedule(work)
-		if err != nil {
-			retry, err := scheduler.ErrorHandlingStrategy(err, work)
-
-			// If we can retry, break out of the loop and try again later
-			if retry {
-				break
-			}
-
-			// If we can't retry, write an error to the request and continue so it takes it off
-			// the queue
-			errSession := work.Session()
-			errSession.Interactions = append(errSession.Interactions, &types.Interaction{
-				Creator: types.CreatorTypeSystem,
-				Error:   err.Error(),
-				Message: "Error scheduling session",
-			})
-			_, err = c.Options.Store.UpdateSession(c.Ctx, *errSession)
-			if err != nil {
-				log.Error().Err(err).Msg("error updating session")
-			}
-		}
-		taken++
-	}
-	c.sessionQueue = c.sessionQueue[taken:]
-	c.sessionSummaryQueue = c.sessionSummaryQueue[taken:]
+	return nil
 }
 
 func (c *Controller) HandleRunnerResponse(ctx context.Context, taskResponse *types.RunnerTaskResponse) (*types.RunnerTaskResponse, error) {

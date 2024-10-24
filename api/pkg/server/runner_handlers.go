@@ -23,17 +23,6 @@ func (apiServer *HelixAPIServer) getRunnerSlots(res http.ResponseWriter, req *ht
 	}
 
 	log.Debug().Str("runner_id", runnerID).Msg("Getting slots for runner")
-	// TODO(PHIL): Temporarily shift the queue to schedule all the work until we take control of it
-	err := apiServer.Controller.ScheduleQueue(req.Context())
-	if err != nil {
-		return nil, err
-	}
-	// TODO(PHIL): Temporarily shift the llm queue to schedule all the work until we take control of it
-	err = apiServer.inferenceServer.ScheduleQueue(req.Context())
-	if err != nil {
-		return nil, err
-	}
-
 	internalSlots := apiServer.scheduler.SlotsForRunner(runnerID)
 
 	// Convert the slots to a PatchRunnerSlots object.

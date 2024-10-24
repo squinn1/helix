@@ -471,7 +471,7 @@ func (r *Runner) pollSlots(ctx context.Context) error {
 			}
 		}
 		if slot.Attributes.Workload.Session != nil {
-			work, err = scheduler.NewSessonWorkload(slot.Attributes.Workload.Session)
+			work, err = scheduler.NewSessionWorkload(slot.Attributes.Workload.Session)
 			if err != nil {
 				return err
 			}

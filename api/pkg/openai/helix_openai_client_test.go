@@ -47,7 +47,7 @@ func (suite *HelixClientTestSuite) SetupTest() {
 	suite.pubsub = pubsub
 
 	cfg, _ := config.LoadServerConfig()
-	scheduler := scheduler.NewScheduler(&cfg)
+	scheduler := scheduler.NewScheduler(suite.ctx, &cfg, nil)
 	scheduler.UpdateRunner(&types.RunnerState{
 		ID:          runnerID,
 		TotalMemory: 9999999999,
