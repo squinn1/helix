@@ -1,53 +1,52 @@
-import React, { FC, useCallback, useEffect, useState, useMemo, useRef } from 'react'
-import TextField from '@mui/material/TextField'
-import Typography from '@mui/material/Typography'
-import Button from '@mui/material/Button'
+import ContentCopyIcon from '@mui/icons-material/ContentCopy'
+import Alert from '@mui/material/Alert'
 import Box from '@mui/material/Box'
+import Button from '@mui/material/Button'
 import Container from '@mui/material/Container'
 import Grid from '@mui/material/Grid'
-import Alert from '@mui/material/Alert'
-import { v4 as uuidv4 } from 'uuid';
-import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
-import Tabs from '@mui/material/Tabs';
-import Tab from '@mui/material/Tab';
-import ContentCopyIcon from '@mui/icons-material/ContentCopy';
-
-import Page from '../components/system/Page'
-import Window from '../components/widgets/Window'
-import DeleteConfirmWindow from '../components/widgets/DeleteConfirmWindow'
-
+import Tab from '@mui/material/Tab'
+import Tabs from '@mui/material/Tabs'
+import TextField from '@mui/material/TextField'
+import Typography from '@mui/material/Typography'
+import React, { FC, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { v4 as uuidv4 } from 'uuid'
+import { parse as parseYaml, stringify as stringifyYaml } from 'yaml'
+import ApiIntegrations from '../components/app/ApiIntegrations'
+import APIKeysSection from '../components/app/APIKeysSection'
+import AppSettings from '../components/app/AppSettings'
+import CodeExamples from '../components/app/CodeExamples'
+import DevelopersSection from '../components/app/DevelopersSection'
+import GPTScriptsSection from '../components/app/GPTScriptsSection'
+import KnowledgeEditor from '../components/app/KnowledgeEditor'
+import PreviewPanel from '../components/app/PreviewPanel'
 import ToolEditor from '../components/app/ToolEditor'
-import KnowledgeEditor from '../components/app/KnowledgeEditor';
-import ApiIntegrations from '../components/app/ApiIntegrations';
-import ZapierIntegrations from '../components/app/ZapierIntegrations';
-import AppSettings from '../components/app/AppSettings';
-import GPTScriptsSection from '../components/app/GPTScriptsSection';
-import APIKeysSection from '../components/app/APIKeysSection';
-import DevelopersSection from '../components/app/DevelopersSection';
-import PreviewPanel from '../components/app/PreviewPanel';
-
-import useApps from '../hooks/useApps'
+import ZapierIntegrations from '../components/app/ZapierIntegrations'
+import Page from '../components/system/Page'
+import DeleteConfirmWindow from '../components/widgets/DeleteConfirmWindow'
+import Window from '../components/widgets/Window'
+import { useStreaming } from '../contexts/streaming'
 import useAccount from '../hooks/useAccount'
+import useApi from '../hooks/useApi'
+import useApps from '../hooks/useApps'
+import useRouter from '../hooks/useRouter'
 import useSession from '../hooks/useSession'
 import useSnackbar from '../hooks/useSnackbar'
-import useRouter from '../hooks/useRouter'
-import useApi from '../hooks/useApi'
-import useWebsocket from '../hooks/useWebsocket'
 import useThemeConfig from '../hooks/useThemeConfig'
-import { useStreaming } from '../contexts/streaming';
+import useWebsocket from '../hooks/useWebsocket'
+import AppLogsTable from '../components/app/AppLogsTable'
 
 import {
-  IAssistantGPTScript,
+  APP_SOURCE_GITHUB,
+  APP_SOURCE_HELIX,
+  IApp,
   IAppUpdate,
+  IAssistantGPTScript,
+  IKnowledgeSearchResult,
+  IKnowledgeSource,
   ISession,
+  ITool,
   SESSION_TYPE_TEXT,
   WEBSOCKET_EVENT_TYPE_SESSION_UPDATE,
-  ITool,
-  APP_SOURCE_HELIX,
-  APP_SOURCE_GITHUB,
-  IApp,
-  IKnowledgeSource,
-  IKnowledgeSearchResult,
 } from '../types'
 
 
@@ -333,32 +332,42 @@ const App: FC = () => {
 
     setShowErrors(false);
 
-    const updatedApp: IAppUpdate = {
-      id: app.id,
-      config: {
-        ...app.config,
-        helix: {
-          ...app.config.helix,
-          name,
-          description,
-          external_url: app.config.helix.external_url,
-          avatar,
-          image,
-          assistants: app.config.helix.assistants.map(assistant => ({
-            ...assistant,
-            system_prompt: systemPrompt,
-            knowledge: knowledgeSources,
-            model: model,
-          })),
+    var updatedApp: IAppUpdate;
+    if (isGithubApp) {
+      // Allow github apps to only update the shared and global flags
+      updatedApp = {
+        ...app,
+        shared,
+        global,
+      };
+    } else {
+      updatedApp = {
+        id: app.id,
+        config: {
+          ...app.config,
+          helix: {
+            ...app.config.helix,
+            name,
+            description,
+            external_url: app.config.helix.external_url,
+            avatar,
+            image,
+            assistants: app.config.helix.assistants.map(assistant => ({
+              ...assistant,
+              system_prompt: systemPrompt,
+              knowledge: knowledgeSources,
+              model: model,
+            })),
+          },
+          secrets,
+          allowed_domains: allowedDomains,
         },
-        secrets,
-        allowed_domains: allowedDomains,
-      },
-      shared,
-      global,
-      owner: app.owner,
-      owner_type: app.owner_type,
-    };
+        shared,
+        global,
+        owner: app.owner,
+        owner_type: app.owner_type,
+      };
+    }
 
     // Only include github config if it exists in the original app
     if (app.config.github) {
@@ -689,8 +698,9 @@ const App: FC = () => {
     snackbar.success('Tool deleted successfully');
   }, [app, snackbar, onSave]);
 
-  const onSaveApiTool = useCallback((tool: ITool) => {
+  const onSaveApiTool = useCallback(async (tool: ITool) => {
     if (!app) return;
+    console.log('saving api tool', tool);
 
     const updatedAssistants = app.config.helix.assistants.map(assistant => ({
       ...assistant,
@@ -699,45 +709,48 @@ const App: FC = () => {
         : [...assistant.tools, tool]
     }));
 
-    setApp(prevApp => ({
-      ...prevApp!,
+    const updatedApp = {
+      ...app,
       config: {
-        ...prevApp!.config,
+        ...app.config,
         helix: {
-          ...prevApp!.config.helix,
+          ...app.config.helix,
           assistants: updatedAssistants,
         },
       },
-    }));
+    };    
 
-    setTools(prevTools => {
-      const updatedTools = prevTools.filter(t => t.id !== tool.id);
-      return [...updatedTools, tool];
-    });
+    const result = await apps.updateApp(app.id, updatedApp);
+    if (result) {
+      setApp(result);
+    }
 
     snackbar.success('API Tool saved successfully');
   }, [app, snackbar]);
 
-  const onDeleteApiTool = useCallback((toolId: string) => {
+  const onDeleteApiTool = useCallback(async (toolId: string) => {
     if (!app) return;
 
     const updatedAssistants = app.config.helix.assistants.map(assistant => ({
       ...assistant,
       tools: assistant.tools.filter(tool => tool.id !== toolId)
-    }));
+    }));    
 
-    setApp(prevApp => ({
-      ...prevApp!,
+    const updatedApp = {
+      ...app,
       config: {
-        ...prevApp!.config,
+        ...app.config,
         helix: {
-          ...prevApp!.config.helix,
+          ...app.config.helix,
           assistants: updatedAssistants,
         },
       },
-    }));
+    };    
 
-    setTools(prevTools => prevTools.filter(tool => tool.id !== toolId));
+    const result = await apps.updateApp(app.id, updatedApp);
+    if (result) {
+      setApp(result);
+    }
 
     snackbar.success('API Tool deleted successfully');
   }, [app, snackbar]);
@@ -745,6 +758,25 @@ const App: FC = () => {
   if(!account.user) return null
   if(!app) return null
   if(!hasLoaded && params.app_id !== "new") return null
+  
+  const handleLaunch = async () => {
+    if (app.id === 'new') {
+      snackbar.error('Please save the app before launching');
+      return;
+    }
+
+    try {
+      const savedApp = await onSave(true);
+      if (savedApp) {
+        navigate('new', { app_id: savedApp.id });
+      } else {
+        snackbar.error('Failed to save app before launching');
+      }
+    } catch (error) {
+      console.error('Error saving app before launch:', error);
+      snackbar.error('Failed to save app before launching');
+    }
+  };
 
   const handleTabChange = (event: React.SyntheticEvent, newValue: string) => {
     setTabValue(newValue);
@@ -770,16 +802,6 @@ const App: FC = () => {
       topbarContent={(
         <Box sx={{ textAlign: 'right' }}>
           <Button
-            id="cancelButton" 
-            sx={{ mr: 2 }}
-            type="button"
-            color="primary"
-            variant="outlined"
-            onClick={ () => navigate('apps') }
-          >
-            Cancel
-          </Button>
-          <Button
             sx={{ mr: 2 }}
             type="button"
             color="primary"
@@ -794,7 +816,7 @@ const App: FC = () => {
             type="button"
             color="secondary"
             variant="contained"
-            onClick={() => navigate('new', { app_id: app.id })}
+            onClick={handleLaunch}
             disabled={app.id === 'new'}
           >
             Launch
@@ -813,6 +835,7 @@ const App: FC = () => {
                 <Tab label="GPTScripts" value="gptscripts" />
                 <Tab label="API Keys" value="apikeys" />
                 <Tab label="Developers" value="developers" />
+                <Tab label="Logs" value="logs" />
               </Tabs>
               
               <Box sx={{ mt: "-1px", borderTop: '1px solid #303047', p: 3 }}>
@@ -911,21 +934,33 @@ const App: FC = () => {
                     navigate={navigate}
                   />
                 )}
+
+                {tabValue === 'logs' && (
+                  <Box sx={{ mt: 2 }}>
+                    <AppLogsTable appId={app.id} />
+                  </Box>
+                )}
               </Box>
               
-              <Box sx={{ mt: 2, pl: 3 }}>
-                <Button
-                  type="button"
-                  color="secondary"
-                  variant="contained"
-                  onClick={() => onSave(false)}
-                  disabled={isReadOnly}
-                >
-                  Save
-                </Button>
-              </Box>
+              {tabValue !== 'developers' && tabValue !== 'apikeys' && tabValue !== 'logs' && (
+                <Box sx={{ mt: 2, pl: 3 }}>
+                  <Button
+                    type="button"
+                    color="secondary"
+                    variant="contained"
+                    onClick={() => onSave(false)}
+                    disabled={isReadOnly && !isGithubApp}
+                  >
+                    Save
+                  </Button>
+                </Box>
+              )}
             </Grid>
-            <PreviewPanel
+            {/* For API keys section show  */}
+            {tabValue === 'apikeys' ? (
+              <CodeExamples apiKey={account.apiKeys[0]?.key || ''} />
+            ) : (
+              <PreviewPanel
               loading={loading}
               name={name}
               avatar={avatar}
@@ -942,7 +977,8 @@ const App: FC = () => {
               serverConfig={account.serverConfig}
               themeConfig={themeConfig}
               snackbar={snackbar}
-            />
+              />
+            )}
           </Grid>
         </Box>
       </Container>

@@ -13,9 +13,9 @@ import (
 	"github.com/helixml/helix/api/pkg/pubsub"
 	"github.com/helixml/helix/api/pkg/rag"
 	"github.com/helixml/helix/api/pkg/store"
-	"github.com/helixml/helix/api/pkg/system"
 	"github.com/helixml/helix/api/pkg/tools"
 	"github.com/helixml/helix/api/pkg/types"
+	"gopkg.in/yaml.v2"
 
 	"github.com/rs/zerolog/log"
 	openai "github.com/sashabaranov/go-openai"
@@ -174,14 +174,6 @@ func (c *Controller) getClient(ctx context.Context, provider types.Provider) (oa
 
 }
 
-func (c *Controller) authorizeUserToApp(user *types.User, app *types.App) error {
-	if (!app.Global && !app.Shared) && app.Owner != user.ID {
-		return system.NewHTTPError403(fmt.Sprintf("you do not have access to the app with the id: %s", app.ID))
-	}
-
-	return nil
-}
-
 func (c *Controller) evaluateToolUsage(ctx context.Context, user *types.User, req openai.ChatCompletionRequest, opts *ChatCompletionOptions) (*openai.ChatCompletionResponse, bool, error) {
 	vals, ok := oai.GetContextValues(ctx)
 	if !ok {
@@ -304,6 +296,10 @@ func (c *Controller) selectAndConfigureTool(ctx context.Context, user *types.Use
 	if assistant != nil && assistant.IsActionableTemplate != "" {
 		options = append(options, tools.WithIsActionableTemplate(assistant.IsActionableTemplate))
 	}
+	// If assistant has configured a model, use it
+	if assistant != nil && assistant.Model != "" {
+		options = append(options, tools.WithModel(assistant.Model))
+	}
 
 	history := types.HistoryFromChatCompletionRequest(req)
 
@@ -339,6 +335,20 @@ func (c *Controller) selectAndConfigureTool(ctx context.Context, user *types.Use
 		return nil, nil, false, fmt.Errorf("tool not found for action: %s", isActionable.Api)
 	}
 
+	// If assistant has configured a model, give the hint to the tool that it should use that model too
+	if assistant != nil && assistant.Model != "" {
+		if selectedTool.Config.API != nil && selectedTool.Config.API.Model == "" {
+			log.Info().
+				Str("assistant_id", assistant.ID).
+				Str("assistant_name", assistant.Name).
+				Str("assistant_model", assistant.Model).
+				Str("tool_name", selectedTool.Name).
+				Msg("assistant has configured a model, and tool has no model specified, using assistant model for tool")
+
+			selectedTool.Config.API.Model = assistant.Model
+		}
+	}
+
 	if len(opts.QueryParams) > 0 && selectedTool.Config.API != nil {
 		selectedTool.Config.API.Query = make(map[string]string)
 
@@ -364,6 +374,12 @@ func (c *Controller) loadAssistant(ctx context.Context, user *types.User, opts *
 		return nil, fmt.Errorf("you do not have access to the app with the id: %s", app.ID)
 	}
 
+	// Load secrets into the app
+	app, err = c.evaluateSecrets(ctx, user, app)
+	if err != nil {
+		return nil, fmt.Errorf("failed to evaluate secrets: %w", err)
+	}
+
 	assistant := data.GetAssistant(app, opts.AssistantID)
 
 	if assistant == nil {
@@ -371,6 +387,58 @@ func (c *Controller) loadAssistant(ctx context.Context, user *types.User, opts *
 	}
 
 	return assistant, nil
+}
+
+func (c *Controller) evaluateSecrets(ctx context.Context, user *types.User, app *types.App) (*types.App, error) {
+	secrets, err := c.Options.Store.ListSecrets(ctx, &store.ListSecretsQuery{
+		Owner: user.ID,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to list secrets: %w", err)
+	}
+
+	var filteredSecrets []*types.Secret
+
+	// Filter out secrets that are not for the current app
+	for _, secret := range secrets {
+		if secret.AppID != "" && secret.AppID != app.ID {
+			continue
+		}
+		filteredSecrets = append(filteredSecrets, secret)
+	}
+
+	// Nothing to do
+	if len(filteredSecrets) == 0 {
+		return app, nil
+	}
+
+	return enrichAppWithSecrets(app, filteredSecrets)
+}
+
+func enrichAppWithSecrets(app *types.App, secrets []*types.Secret) (*types.App, error) {
+	appYaml, err := yaml.Marshal(app)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal app: %w", err)
+	}
+
+	envs := make(map[string]string)
+	for _, secret := range secrets {
+		envs[secret.Name] = string(secret.Value)
+	}
+
+	processed, err := Eval(string(appYaml), envs)
+	if err != nil {
+		return nil, fmt.Errorf("failed to evaluate secrets: %w", err)
+	}
+
+	var enrichedApp types.App
+
+	err = yaml.Unmarshal([]byte(processed), &enrichedApp)
+	if err != nil {
+		return nil, fmt.Errorf("failed to unmarshal app: %w", err)
+	}
+
+	return &enrichedApp, nil
 }
 
 func (c *Controller) enrichPromptWithKnowledge(ctx context.Context, user *types.User, req *openai.ChatCompletionRequest, assistant *types.AssistantConfig, opts *ChatCompletionOptions) error {

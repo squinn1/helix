@@ -65,8 +65,10 @@ type Helix struct {
 	OwnerID            string        `envconfig:"TOOLS_PROVIDER_HELIX_OWNER_ID" default:"helix-internal"` // Will be used for sesions
 	OwnerType          string        `envconfig:"TOOLS_PROVIDER_HELIX_OWNER_TYPE" default:"system"`       // Will be used for sesions
 	ModelTTL           time.Duration `envconfig:"HELIX_MODEL_TTL" default:"10s"`                          // How long to keep models warm before allowing other work to be scheduled
+	SlotTTL            time.Duration `envconfig:"HELIX_SLOT_TTL" default:"300s"`                          // How long to wait for work to complete before slots are considered dead
 	RunnerTTL          time.Duration `envconfig:"HELIX_RUNNER_TTL" default:"30s"`                         // How long before runners are considered dead
 	SchedulingStrategy string        `envconfig:"HELIX_SCHEDULING_STRATEGY" default:"max_spread" description:"The strategy to use for scheduling workloads."`
+	QueueSize          int           `envconfig:"HELIX_QUEUE_SIZE" default:"100" description:"The size of the queue when buffering workloads."`
 }
 
 type Tools struct {
@@ -186,7 +188,11 @@ type RAG struct {
 	}
 
 	Crawler struct {
-		ChromeURL string `envconfig:"RAG_CRAWLER_CHROME_URL" default:"http://chrome:9222" description:"The URL to the Chrome instance."`
+		ChromeURL       string `envconfig:"RAG_CRAWLER_CHROME_URL" default:"http://chrome:9222" description:"The URL to the Chrome instance."`
+		LauncherEnabled bool   `envconfig:"RAG_CRAWLER_LAUNCHER_ENABLED" default:"true" description:"Whether to use the Launcher to start the browser."`
+		LauncherURL     string `envconfig:"RAG_CRAWLER_LAUNCHER_URL" default:"http://chrome:7317" description:"The URL to the Launcher instance."`
+		BrowserPoolSize int    `envconfig:"RAG_CRAWLER_BROWSER_POOL_SIZE" default:"5" description:"The number of browsers to keep in the pool."`
+		PagePoolSize    int    `envconfig:"RAG_CRAWLER_PAGE_POOL_SIZE" default:"50" description:"The number of pages to keep in the pool."`
 	}
 }
 

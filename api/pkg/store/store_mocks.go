@@ -8,8 +8,8 @@ import (
 	context "context"
 	reflect "reflect"
 
-	types "github.com/helixml/helix/api/pkg/types"
 	gomock "go.uber.org/mock/gomock"
+	types "github.com/helixml/helix/api/pkg/types"
 )
 
 // MockStore is a mock of Store interface.
@@ -138,6 +138,21 @@ func (m *MockStore) CreateScriptRun(ctx context.Context, task *types.ScriptRun) 
 func (mr *MockStoreMockRecorder) CreateScriptRun(ctx, task interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CreateScriptRun", reflect.TypeOf((*MockStore)(nil).CreateScriptRun), ctx, task)
+}
+
+// CreateSecret mocks base method.
+func (m *MockStore) CreateSecret(ctx context.Context, secret *types.Secret) (*types.Secret, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "CreateSecret", ctx, secret)
+	ret0, _ := ret[0].(*types.Secret)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// CreateSecret indicates an expected call of CreateSecret.
+func (mr *MockStoreMockRecorder) CreateSecret(ctx, secret interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CreateSecret", reflect.TypeOf((*MockStore)(nil).CreateSecret), ctx, secret)
 }
 
 // CreateSession mocks base method.
@@ -283,6 +298,20 @@ func (mr *MockStoreMockRecorder) DeleteScriptRun(ctx, id interface{}) *gomock.Ca
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeleteScriptRun", reflect.TypeOf((*MockStore)(nil).DeleteScriptRun), ctx, id)
 }
 
+// DeleteSecret mocks base method.
+func (m *MockStore) DeleteSecret(ctx context.Context, id string) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "DeleteSecret", ctx, id)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// DeleteSecret indicates an expected call of DeleteSecret.
+func (mr *MockStoreMockRecorder) DeleteSecret(ctx, id interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeleteSecret", reflect.TypeOf((*MockStore)(nil).DeleteSecret), ctx, id)
+}
+
 // DeleteSession mocks base method.
 func (m *MockStore) DeleteSession(ctx context.Context, id string) (*types.Session, error) {
 	m.ctrl.T.Helper()
@@ -414,6 +443,21 @@ func (m *MockStore) GetKnowledgeVersion(ctx context.Context, id string) (*types.
 func (mr *MockStoreMockRecorder) GetKnowledgeVersion(ctx, id interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetKnowledgeVersion", reflect.TypeOf((*MockStore)(nil).GetKnowledgeVersion), ctx, id)
+}
+
+// GetSecret mocks base method.
+func (m *MockStore) GetSecret(ctx context.Context, id string) (*types.Secret, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetSecret", ctx, id)
+	ret0, _ := ret[0].(*types.Secret)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetSecret indicates an expected call of GetSecret.
+func (mr *MockStoreMockRecorder) GetSecret(ctx, id interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetSecret", reflect.TypeOf((*MockStore)(nil).GetSecret), ctx, id)
 }
 
 // GetSession mocks base method.
@@ -567,9 +611,9 @@ func (mr *MockStoreMockRecorder) ListKnowledgeVersions(ctx, q interface{}) *gomo
 }
 
 // ListLLMCalls mocks base method.
-func (m *MockStore) ListLLMCalls(ctx context.Context, page, pageSize int, sessionFilter string) ([]*types.LLMCall, int64, error) {
+func (m *MockStore) ListLLMCalls(ctx context.Context, q *ListLLMCallsQuery) ([]*types.LLMCall, int64, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "ListLLMCalls", ctx, page, pageSize, sessionFilter)
+	ret := m.ctrl.Call(m, "ListLLMCalls", ctx, q)
 	ret0, _ := ret[0].([]*types.LLMCall)
 	ret1, _ := ret[1].(int64)
 	ret2, _ := ret[2].(error)
@@ -577,9 +621,9 @@ func (m *MockStore) ListLLMCalls(ctx context.Context, page, pageSize int, sessio
 }
 
 // ListLLMCalls indicates an expected call of ListLLMCalls.
-func (mr *MockStoreMockRecorder) ListLLMCalls(ctx, page, pageSize, sessionFilter interface{}) *gomock.Call {
+func (mr *MockStoreMockRecorder) ListLLMCalls(ctx, q interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListLLMCalls", reflect.TypeOf((*MockStore)(nil).ListLLMCalls), ctx, page, pageSize, sessionFilter)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListLLMCalls", reflect.TypeOf((*MockStore)(nil).ListLLMCalls), ctx, q)
 }
 
 // ListScriptRuns mocks base method.
@@ -595,6 +639,21 @@ func (m *MockStore) ListScriptRuns(ctx context.Context, q *types.GptScriptRunsQu
 func (mr *MockStoreMockRecorder) ListScriptRuns(ctx, q interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListScriptRuns", reflect.TypeOf((*MockStore)(nil).ListScriptRuns), ctx, q)
+}
+
+// ListSecrets mocks base method.
+func (m *MockStore) ListSecrets(ctx context.Context, q *ListSecretsQuery) ([]*types.Secret, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ListSecrets", ctx, q)
+	ret0, _ := ret[0].([]*types.Secret)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ListSecrets indicates an expected call of ListSecrets.
+func (mr *MockStoreMockRecorder) ListSecrets(ctx, q interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListSecrets", reflect.TypeOf((*MockStore)(nil).ListSecrets), ctx, q)
 }
 
 // ListSessionTools mocks base method.
@@ -701,6 +760,21 @@ func (mr *MockStoreMockRecorder) UpdateKnowledgeState(ctx, id, state, message, p
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UpdateKnowledgeState", reflect.TypeOf((*MockStore)(nil).UpdateKnowledgeState), ctx, id, state, message, percent)
 }
 
+// UpdateSecret mocks base method.
+func (m *MockStore) UpdateSecret(ctx context.Context, secret *types.Secret) (*types.Secret, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "UpdateSecret", ctx, secret)
+	ret0, _ := ret[0].(*types.Secret)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// UpdateSecret indicates an expected call of UpdateSecret.
+func (mr *MockStoreMockRecorder) UpdateSecret(ctx, secret interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UpdateSecret", reflect.TypeOf((*MockStore)(nil).UpdateSecret), ctx, secret)
+}
+
 // UpdateSession mocks base method.
 func (m *MockStore) UpdateSession(ctx context.Context, session types.Session) (*types.Session, error) {
 	m.ctrl.T.Helper()
@@ -729,6 +803,20 @@ func (m *MockStore) UpdateSessionMeta(ctx context.Context, data types.SessionMet
 func (mr *MockStoreMockRecorder) UpdateSessionMeta(ctx, data interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UpdateSessionMeta", reflect.TypeOf((*MockStore)(nil).UpdateSessionMeta), ctx, data)
+}
+
+// UpdateSessionName mocks base method.
+func (m *MockStore) UpdateSessionName(ctx context.Context, sessionID, name string) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "UpdateSessionName", ctx, sessionID, name)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// UpdateSessionName indicates an expected call of UpdateSessionName.
+func (mr *MockStoreMockRecorder) UpdateSessionName(ctx, sessionID, name interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UpdateSessionName", reflect.TypeOf((*MockStore)(nil).UpdateSessionName), ctx, sessionID, name)
 }
 
 // UpdateTool mocks base method.

@@ -70,6 +70,11 @@ func NewOllamaInferenceModelInstance(ctx context.Context, cfg *InferenceModelIns
 
 	// Enqueue the first request
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				log.Error().Msgf("Recovered from panic in OllamaInferenceModelInstance.Start: %v, work probably lost", r)
+			}
+		}()
 		i.workCh <- request
 	}()
 
@@ -129,6 +134,12 @@ type OllamaInferenceModelInstance struct {
 
 	// Interface to find free ports
 	freePortFinder FreePortFinder
+
+	// ensure ollama client creation is single threaded
+	ollamaClientMutex sync.Mutex
+
+	// port is the port that the ollama server is running on
+	port int
 }
 
 // Warmup starts Ollama server and pulls the models
@@ -138,7 +149,12 @@ func (i *OllamaInferenceModelInstance) Warmup(_ context.Context) error {
 		return err
 	}
 
-	return i.warmup(i.ctx)
+	err = i.warmup(i.ctx)
+	if err != nil {
+		return err
+	}
+
+	return i.Stop()
 }
 
 func (i *OllamaInferenceModelInstance) Start(_ context.Context) error {
@@ -148,6 +164,12 @@ func (i *OllamaInferenceModelInstance) Start(_ context.Context) error {
 	}
 
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				log.Error().Msgf("Recovered from panic in OllamaInferenceModelInstance.Start: %v, work probably lost", r)
+			}
+		}()
+
 		for {
 			select {
 			case <-i.ctx.Done():
@@ -205,6 +227,8 @@ func (i *OllamaInferenceModelInstance) Start(_ context.Context) error {
 
 				log.Info().Str("session_id", req.SessionID).Msg("🟢 enqueuing request")
 
+				// this can fail because workCh is closed, in which case we
+				// recover above
 				i.workCh <- req
 			}
 		}
@@ -253,6 +277,8 @@ func (i *OllamaInferenceModelInstance) warmup(_ context.Context) error {
 		return fmt.Errorf("error pulling model: %s", err.Error())
 	}
 
+	wg.Wait()
+
 	return nil
 }
 
@@ -267,14 +293,22 @@ func (i *OllamaInferenceModelInstance) startOllamaServer(_ context.Context) erro
 	if err != nil {
 		return fmt.Errorf("error getting free port: %s", err.Error())
 	}
-
-	config := openai.DefaultConfig("ollama")
-	config.BaseURL = fmt.Sprintf("http://localhost:%d/v1", port)
+	i.port = port
 
 	ollamaHost := fmt.Sprintf("0.0.0.0:%d", port)
 
-	os.Setenv("OLLAMA_HOST", ollamaHost)
-	i.client, err = api.ClientFromEnvironment()
+	func() {
+		// ollama client only supports being constructed from the environment, but
+		// the environment is global. ensure we speak to the right ollama server by
+		// only allowing one client to be created at a time
+
+		i.ollamaClientMutex.Lock()
+		defer i.ollamaClientMutex.Unlock()
+
+		os.Setenv("OLLAMA_HOST", ollamaHost)
+		i.client, err = api.ClientFromEnvironment()
+	}()
+
 	if err != nil {
 		return fmt.Errorf("error creating Ollama client: %s", err.Error())
 	}
@@ -287,6 +321,9 @@ func (i *OllamaInferenceModelInstance) startOllamaServer(_ context.Context) erro
 
 	cmd.Env = append(cmd.Env,
 		"OLLAMA_KEEP_ALIVE=-1",
+		"OLLAMA_MAX_LOADED_MODELS=1",
+		"OLLAMA_NUM_PARALLEL=1",
+		"OLLAMA_FLASH_ATTENTION=1",
 		"HTTP_PROXY="+os.Getenv("HTTP_PROXY"),
 		"HTTPS_PROXY="+os.Getenv("HTTPS_PROXY"),
 		"OLLAMA_HOST="+ollamaHost,                 // Bind on localhost with random port
@@ -410,12 +447,6 @@ func (i *OllamaInferenceModelInstance) Stale() bool {
 		return false
 	}
 
-	// If we are fetching the next request, we don't want to mark it as stale
-	// as we might be getting the request
-	if i.fetching.Load() {
-		return false
-	}
-
 	return time.Since(i.lastActivity) > i.runnerOptions.Config.Runtimes.Ollama.InstanceTTL
 }
 
@@ -460,6 +491,8 @@ func (i *OllamaInferenceModelInstance) GetState() (*types.ModelInstanceState, er
 		stale = true
 	}
 
+	status := i.getOllamaStatus()
+
 	return &types.ModelInstanceState{
 		ID:               i.id,
 		ModelName:        string(i.modelName),
@@ -471,7 +504,40 @@ func (i *OllamaInferenceModelInstance) GetState() (*types.ModelInstanceState, er
 		LastActivity:     int(i.lastActivity.Unix()),
 		Stale:            stale,
 		MemoryUsage:      i.model.GetMemoryRequirements(types.SessionModeInference),
+		Status:           status,
 	}, nil
+}
+
+func (i *OllamaInferenceModelInstance) getOllamaStatus() string {
+	// Create a context with a 1-second timeout
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+
+	// Prepare the command with the custom environment
+	cmd := exec.CommandContext(ctx, "ollama", "ps")
+	cmd.Env = append(os.Environ(), fmt.Sprintf("OLLAMA_HOST=127.0.0.1:%d", i.port))
+
+	// Run the command
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		if ctx.Err() == context.DeadlineExceeded {
+			log.Warn().Msg("Ollama ps command timed out after 1 second")
+			return "Starting Ollama"
+		}
+		log.Error().Err(err).Msgf("Failed to execute ollama ps command with environment OLLAMA_HOST=127.0.0.1:%d", i.port)
+		return "Unknown"
+	}
+
+	lines := strings.Split(strings.TrimSpace(string(output)), "\n")
+	if len(lines) < 2 {
+		return "Loading model"
+	}
+
+	// Join all lines except the first (header) line
+	status := strings.Join(lines[1:], "\n")
+	log.Debug().Msgf("Ollama status on port %d:\n%s", i.port, status)
+
+	return status
 }
 
 func (i *OllamaInferenceModelInstance) processInteraction(inferenceReq *types.RunnerLLMInferenceRequest) error {
@@ -514,7 +580,6 @@ func (i *OllamaInferenceModelInstance) processInteraction(inferenceReq *types.Ru
 		Stream:   &inferenceReq.Request.Stream,
 		Options: map[string]interface{}{
 			"temperature": inferenceReq.Request.Temperature,
-			"max_tokens":  max_tokens,
 			"num_ctx":     max_tokens,
 			"seed":        inferenceReq.Request.Seed,
 			"top_p":       inferenceReq.Request.TopP,
@@ -522,10 +587,30 @@ func (i *OllamaInferenceModelInstance) processInteraction(inferenceReq *types.Ru
 		},
 	}
 
+	// Ensure Ollama is ready before sending a request
+	log.Info().Msg("waiting for Ollama to be ready")
+	startTime := time.Now()
+	timeout := 300 * time.Second
+	for {
+		status := i.getOllamaStatus()
+		if status != "Starting Ollama" {
+			break
+		}
+		if time.Since(startTime) > timeout {
+			return fmt.Errorf("timeout waiting for Ollama to be ready")
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	log.Info().Msgf("ready in %.4f seconds", time.Since(startTime).Seconds())
+
+	// If the request takes longer than 10 minutes, cancel it
+	timeoutCtx, cancel := context.WithTimeout(i.ctx, 600*time.Second)
+	defer cancel()
+
 	switch {
 	case inferenceReq.Request.Stream:
 		start := time.Now()
-		err := i.client.Chat(context.Background(), &req, func(resp api.ChatResponse) error {
+		err := i.client.Chat(timeoutCtx, &req, func(resp api.ChatResponse) error {
 			finishReason := openai.FinishReasonNull
 			if resp.Metrics.EvalCount >= inferenceReq.Request.MaxTokens {
 				finishReason = openai.FinishReasonLength
@@ -561,7 +646,7 @@ func (i *OllamaInferenceModelInstance) processInteraction(inferenceReq *types.Ru
 		return nil
 	default:
 		start := time.Now()
-		err := i.client.Chat(context.Background(), &req, func(resp api.ChatResponse) error {
+		err := i.client.Chat(timeoutCtx, &req, func(resp api.ChatResponse) error {
 			finishReason := openai.FinishReasonStop
 			if resp.Metrics.EvalCount >= inferenceReq.Request.MaxTokens {
 				finishReason = openai.FinishReasonLength
@@ -684,3 +769,7 @@ func (i *OllamaInferenceModelInstance) errorResponse(req *types.RunnerLLMInferen
 }
 
 func (i *OllamaInferenceModelInstance) QueueSession(session *types.Session, isInitialSession bool) {}
+
+func (i *OllamaInferenceModelInstance) IsActive() bool {
+	return i.currentRequest != nil
+}

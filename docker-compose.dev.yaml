@@ -156,15 +156,8 @@ services:
       - ${TYPESENSE_DATA:-helix-typesense-db}:/data
   chrome:
     image: ghcr.io/go-rod/rod:v0.115.0
-    command: [
-      "chrome",
-      "--headless",
-      "--no-sandbox",
-      "--remote-debugging-port=9222",
-      "--remote-debugging-address=0.0.0.0"
-    ]
+    restart: always
     ports:
-      - 9222:9222
       - 7317:7317
   llamaindex:
     profiles: [full]
@@ -198,9 +191,10 @@ services:
       - api
   dev_gpu_runner:
     profiles: ["dev_gpu_runner"]
-    build:
-      context: .
-      dockerfile: Dockerfile.runner
+    #build:
+    #  context: .
+    #  dockerfile: Dockerfile.runner
+    image: registry.helix.ml/helix/runner:latest-large
     entrypoint: ${RUNNER_ENTRYPOINT:-tail -f /dev/null}
     env_file:
       - .env

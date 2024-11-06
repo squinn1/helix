@@ -304,10 +304,10 @@ func (apiServer *HelixAPIServer) registerRoutes(_ context.Context) (*mux.Router,
 	subRouter.HandleFunc("/sessions/{id}/finetune/text/conversations/{interaction}", system.Wrapper(apiServer.getSessionFinetuneConversation)).Methods("GET")
 	authRouter.HandleFunc("/sessions/{id}/finetune/text/conversations/{interaction}", system.Wrapper(apiServer.setSessionFinetuneConversation)).Methods("PUT")
 
-	authRouter.HandleFunc("/tools", system.Wrapper(apiServer.listTools)).Methods("GET")
-	authRouter.HandleFunc("/tools", system.Wrapper(apiServer.createTool)).Methods("POST")
-	authRouter.HandleFunc("/tools/{id}", system.Wrapper(apiServer.updateTool)).Methods("PUT")
-	authRouter.HandleFunc("/tools/{id}", system.Wrapper(apiServer.deleteTool)).Methods("DELETE")
+	authRouter.HandleFunc("/secrets", system.Wrapper(apiServer.listSecrets)).Methods("GET")
+	authRouter.HandleFunc("/secrets", system.Wrapper(apiServer.createSecret)).Methods("POST")
+	authRouter.HandleFunc("/secrets/{id}", system.Wrapper(apiServer.updateSecret)).Methods("PUT")
+	authRouter.HandleFunc("/secrets/{id}", system.Wrapper(apiServer.deleteSecret)).Methods("DELETE")
 
 	authRouter.HandleFunc("/apps", system.Wrapper(apiServer.listApps)).Methods("GET")
 	authRouter.HandleFunc("/apps", system.Wrapper(apiServer.createApp)).Methods("POST")
@@ -315,6 +315,7 @@ func (apiServer *HelixAPIServer) registerRoutes(_ context.Context) (*mux.Router,
 	authRouter.HandleFunc("/apps/{id}", system.Wrapper(apiServer.updateApp)).Methods("PUT")
 	authRouter.HandleFunc("/apps/github/{id}", system.Wrapper(apiServer.updateGithubApp)).Methods("PUT")
 	authRouter.HandleFunc("/apps/{id}", system.Wrapper(apiServer.deleteApp)).Methods("DELETE")
+	authRouter.HandleFunc("/apps/{id}/llm-calls", system.Wrapper(apiServer.listAppLLMCalls)).Methods("GET")
 
 	authRouter.HandleFunc("/search", system.Wrapper(apiServer.knowledgeSearch)).Methods("GET")
 
@@ -342,6 +343,8 @@ func (apiServer *HelixAPIServer) registerRoutes(_ context.Context) (*mux.Router,
 	runnerRouter.HandleFunc("/runner/{runnerid}/session/{sessionid}/upload/folder", system.DefaultWrapper(apiServer.runnerSessionUploadFolder)).Methods("POST")
 
 	runnerRouter.HandleFunc("/runner/{runnerid}/llm-inference-request", system.DefaultWrapper(apiServer.runnerLLMInferenceRequestHandler)).Methods("GET")
+
+	runnerRouter.HandleFunc("/runner/{runnerid}/slots", system.DefaultWrapper(apiServer.getDesiredRunnerSlots)).Methods("GET")
 
 	// register pprof routes
 	router.PathPrefix("/debug/pprof/").Handler(http.DefaultServeMux)

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"time"
 
+	"github.com/google/uuid"
 	openai "github.com/sashabaranov/go-openai"
 	"gorm.io/datatypes"
 )
@@ -683,6 +684,7 @@ type ServerConfigForFrontend struct {
 	AppsEnabled             bool   `json:"apps_enabled"`
 	RudderStackWriteKey     string `json:"rudderstack_write_key"`
 	RudderStackDataPlaneURL string `json:"rudderstack_data_plane_url"`
+	Version                 string `json:"version"`
 }
 
 // a short version of a session that we keep for the dashboard
@@ -724,6 +726,7 @@ type ModelInstanceState struct {
 	// (even though we could work it out)
 	Stale       bool   `json:"stale"`
 	MemoryUsage uint64 `json:"memory"`
+	Status      string `json:"status"`
 }
 
 // the basic struct reported by a runner when it connects
@@ -738,9 +741,12 @@ type RunnerState struct {
 	Labels              map[string]string     `json:"labels"`
 	ModelInstances      []*ModelInstanceState `json:"model_instances"`
 	SchedulingDecisions []string              `json:"scheduling_decisions"`
+	Version             string                `json:"version"`
+	Slots               []RunnerActualSlot    `json:"slots"`
 }
 
 type DashboardData struct {
+	DesiredSlots              []DesiredSlots              `json:"desired_slots"`
 	SessionQueue              []*SessionSummary           `json:"session_queue"`
 	Runners                   []*RunnerState              `json:"runners"`
 	GlobalSchedulingDecisions []*GlobalSchedulingDecision `json:"global_scheduling_decisions"`
@@ -916,6 +922,8 @@ type ToolApiConfig struct {
 	RequestPrepTemplate     string `json:"request_prep_template" yaml:"request_prep_template"`         // Template for request preparation, leave empty for default
 	ResponseSuccessTemplate string `json:"response_success_template" yaml:"response_success_template"` // Template for successful response, leave empty for default
 	ResponseErrorTemplate   string `json:"response_error_template" yaml:"response_error_template"`     // Template for error response, leave empty for default
+
+	Model string `json:"model" yaml:"model"`
 }
 
 // ToolApiConfig is parsed from the OpenAPI spec
@@ -1024,6 +1032,15 @@ type AssistantConfig struct {
 	// we populate the tools array from the APIs and GPTScripts arrays
 	// so - Tools is readonly - hence only JSON for the frontend to see
 	Tools []*Tool `json:"tools"`
+
+	// Add these new fields for tests
+	Tests []struct {
+		Name  string `json:"name" yaml:"name"`
+		Steps []struct {
+			Prompt         string `json:"prompt" yaml:"prompt"`
+			ExpectedOutput string `json:"expected_output" yaml:"expected_output"`
+		} `json:"steps" yaml:"steps"`
+	} `json:"tests" yaml:"tests"`
 }
 
 type AppHelixConfig struct {
@@ -1400,12 +1417,14 @@ const (
 	LLMCallStepIsActionable      LLMCallStep = "is_actionable"
 	LLMCallStepPrepareAPIRequest LLMCallStep = "prepare_api_request"
 	LLMCallStepInterpretResponse LLMCallStep = "interpret_response"
+	LLMCallStepGenerateTitle     LLMCallStep = "generate_title"
 )
 
 // LLMCall used to store the request and response of LLM calls
 // done by helix to LLM providers such as openai, togetherai or helix itself
 type LLMCall struct {
 	ID               string         `json:"id" gorm:"primaryKey"`
+	AppID            string         `json:"app_id" gorm:"index"`
 	UserID           string         `json:"user_id" gorm:"index"`
 	Created          time.Time      `json:"created"`
 	Updated          time.Time      `json:"updated"`
@@ -1421,4 +1440,63 @@ type LLMCall struct {
 	PromptTokens     int64
 	CompletionTokens int64
 	TotalTokens      int64
+}
+
+type CreateSecretRequest struct {
+	Name  string `json:"name"`
+	Value string `json:"value"`
+	AppID string `json:"app_id"`
+}
+
+type Secret struct {
+	ID        string    `json:"id,omitempty" yaml:"id,omitempty"`
+	Created   time.Time `json:"created,omitempty" yaml:"created,omitempty"`
+	Updated   time.Time `json:"updated,omitempty" yaml:"updated,omitempty"`
+	Owner     string
+	OwnerType OwnerType
+	Name      string `json:"name" yaml:"name"`
+	Value     []byte `json:"value" yaml:"value" gorm:"type:bytea"`
+	AppID     string `json:"app_id" yaml:"app_id"` // optional, if set, the secret will be available to the specified app
+}
+
+type GetDesiredRunnerSlotsResponse struct {
+	Data []DesiredRunnerSlot `json:"data"`
+}
+
+type DesiredSlots struct {
+	ID   string              `json:"id"`
+	Data []DesiredRunnerSlot `json:"data"`
+}
+
+type DesiredRunnerSlot struct {
+	ID         uuid.UUID                   `json:"id"`
+	Attributes DesiredRunnerSlotAttributes `json:"attributes"`
+}
+
+type WorkloadType string
+
+const (
+	WorkloadTypeLLMInferenceRequest WorkloadType = "llm"
+	WorkloadTypeSession             WorkloadType = "session"
+)
+
+type DesiredRunnerSlotAttributes struct {
+	Workload *RunnerWorkload `json:"workload,omitempty"`
+	Model    string          `json:"model"`
+	Mode     string          `json:"mode"`
+}
+
+type RunnerWorkload struct {
+	LLMInferenceRequest *RunnerLLMInferenceRequest
+	Session             *Session
+}
+
+type RunnerActualSlot struct {
+	ID         uuid.UUID                  `json:"id"`
+	Attributes RunnerActualSlotAttributes `json:"attributes"`
+}
+
+type RunnerActualSlotAttributes struct {
+	OriginalWorkload *RunnerWorkload `json:"original_workload,omitempty"`
+	CurrentWorkload  *RunnerWorkload `json:"current_workload,omitempty"`
 }

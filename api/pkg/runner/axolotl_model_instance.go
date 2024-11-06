@@ -1,3 +1,6 @@
+//go:build !windows
+// +build !windows
+
 package runner
 
 import (
@@ -112,6 +115,10 @@ func (i *AxolotlModelInstance) Model() model.Model {
 
 func (i *AxolotlModelInstance) Done() <-chan bool {
 	return i.finishChan
+}
+
+func (i *AxolotlModelInstance) IsActive() bool {
+	return i.currentSession != nil || i.nextSession != nil || i.queuedSession != nil
 }
 
 type ModelInstanceConfig struct {

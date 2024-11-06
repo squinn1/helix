@@ -11,6 +11,7 @@ import (
 	"github.com/helixml/helix/api/pkg/model"
 	"github.com/helixml/helix/api/pkg/pubsub"
 	"github.com/helixml/helix/api/pkg/scheduler"
+	"github.com/helixml/helix/api/pkg/system"
 	"github.com/helixml/helix/api/pkg/types"
 	"github.com/rs/zerolog/log"
 )
@@ -36,9 +37,6 @@ type InternalHelixServer struct {
 	pubsub pubsub.PubSub // Used to get responses from the runners
 	// controller Controller    // Used to create sessions
 
-	queueMu sync.Mutex
-	queue   []*types.RunnerLLMInferenceRequest
-
 	schedulingDecisionsMu sync.Mutex
 	schedulingDecisions   []*types.GlobalSchedulingDecision
 	scheduler             scheduler.Scheduler
@@ -59,36 +57,8 @@ func (c *InternalHelixServer) ListModels(ctx context.Context) ([]model.OpenAIMod
 // TODO: move logic from controller and other places. This method would be called directly from the runner
 // handler to get the next session. Pubsub is handled internally within this package
 func (c *InternalHelixServer) GetNextLLMInferenceRequest(ctx context.Context, filter types.InferenceRequestFilter, runnerID string) (*types.RunnerLLMInferenceRequest, error) {
-	c.queueMu.Lock()
-	defer c.queueMu.Unlock()
-
-	// Doing all the scheduling work here to avoid making too many changes at once. Schedule any
-	// requests that are currently in the queue.
-	taken := 0
-	for _, req := range c.queue {
-		work, err := scheduler.NewLLMWorkload(req)
-		if err != nil {
-			log.Warn().Err(err).Str("id", req.RequestID).Msg("creating workload")
-			continue
-		}
-		err = c.scheduler.Schedule(work)
-		if err != nil {
-			retry, err := scheduler.ErrorHandlingStrategy(err, work)
-
-			// If we can retry, break out of the loop and try again later
-			if retry {
-				break
-			}
-
-			// If we can't retry, write an error to the request and continue so it takes it off
-			// the queue
-			// TODO(Phil): Not sure how to write an error back as a response
-			log.Error().Err(err).Str("id", work.ID()).Msg("error scheduling")
-		}
-		taken++
-	}
-	// Clear processed queue
-	c.queue = c.queue[taken:]
+	// Track beginning of request
+	runnerReqID := system.GenerateID()
 
 	// Default to requesting warm work
 	newWorkOnly := false
@@ -99,29 +69,51 @@ func (c *InternalHelixServer) GetNextLLMInferenceRequest(ctx context.Context, fi
 	}
 
 	// Now for this runner, get work
-	req, err := c.scheduler.WorkForRunner(runnerID, scheduler.WorkloadTypeLLMInferenceRequest, newWorkOnly)
+	req, err := c.scheduler.WorkForRunner(runnerID, scheduler.WorkloadTypeLLMInferenceRequest, newWorkOnly, filter.ModelName)
 	if err != nil {
+		log.Error().
+			Err(err).
+			Str("runner_id", runnerID).
+			Str("runner_request_id", runnerReqID).
+			Any("filter", filter).
+			Bool("new_work_only", newWorkOnly).
+			Msg("error getting work for runner")
 		return nil, fmt.Errorf("error getting work for runner: %w", err)
 	}
 
 	if req != nil {
 		c.addSchedulingDecision(filter, runnerID, runnerID, req.LLMInferenceRequest().SessionID, req.LLMInferenceRequest().InteractionID)
-		log.Info().Str("runnerID", runnerID).Interface("filter", filter).Interface("req", req).Int("len(queue)", len(c.queue)).Msgf("🟠 helix_openai_server GetNextLLMInferenceRequest END")
+		log.Info().
+			Str("runner_id", runnerID).
+			Str("runner_request_id", runnerReqID).
+			Any("filter", filter).
+			Any("req", req).
+			Bool("new_work_only", newWorkOnly).
+			Msg("returning llm inference request")
 		return req.LLMInferenceRequest(), nil
 	}
 	return nil, nil
 
 }
 
-func (c *InternalHelixServer) enqueueRequest(req *types.RunnerLLMInferenceRequest) {
-	c.queueMu.Lock()
-	defer c.queueMu.Unlock()
-
-	c.queue = append(c.queue, req)
+func (c *InternalHelixServer) enqueueRequest(req *types.RunnerLLMInferenceRequest) error {
+	work, err := scheduler.NewLLMWorkload(req)
+	if err != nil {
+		return fmt.Errorf("error creating workload: %w", err)
+	}
+	err = c.scheduler.Enqueue(work)
+	if err != nil {
+		return fmt.Errorf("error enqueuing work: %w", err)
+	}
+	return nil
 }
 
 // ProcessRunnerResponse is called on both partial streaming and full responses coming from the runner
 func (c *InternalHelixServer) ProcessRunnerResponse(ctx context.Context, resp *types.RunnerLLMInferenceResponse) error {
+	err := c.scheduler.Begin(resp.RequestID)
+	if err != nil {
+		log.Warn().Err(err).Str("request_id", resp.RequestID).Msg("error beginning allocation, continuing...")
+	}
 	if resp.Done || resp.Error != "" {
 		err := c.scheduler.Release(
 			resp.RequestID,

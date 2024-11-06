@@ -38,7 +38,7 @@ steps:
     TYPESENSE_URL: http://typesense:8108
     TYPESENSE_API_KEY: typesense
     TEXT_EXTRACTION_TIKA_URL: http://tika:9998
-    CHROME_URL: http://chrome:9222
+    RAG_CRAWLER_LAUNCHER_URL: http://chrome:7317
   commands:
     - go test -v ./...
   when:
@@ -47,10 +47,11 @@ steps:
   depends_on: []
 
 - name: release-backend
-  image: golang:1.22.5-alpine3.19
+  image: golang:1.22.5-bullseye
   when:
     event:
     - tag
+    - push
   environment:
     GITHUB_TOKEN:
       from_secret: github_token
@@ -62,17 +63,19 @@ steps:
       else
         VERSION_FLAG=""
       fi
-      CGO_ENABLED=0 gox -osarch="linux/amd64 linux/arm64 darwin/amd64 darwin/arm64" -ldflags "-extldflags '-static' $VERSION_FLAG" -output="helix-{{.OS}}-{{.Arch}}"
+      CGO_ENABLED=0 gox -osarch="linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64" -ldflags "-extldflags '-static' $VERSION_FLAG" -output="helix-{{.OS}}-{{.Arch}}"
     - ./helix-linux-amd64 version
-    - apk add --no-cache github-cli sed
+    - apt-get update && apt-get install -y curl
+    - curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg
+    - echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | tee /etc/apt/sources.list.d/github-cli.list > /dev/null
+    - apt-get update && apt-get install -y gh
+    - sed -i "s/:latest/:$DRONE_TAG/g" docker-compose.yaml
     - |
       if [ -n "$DRONE_TAG" ]; then
-        # Update docker-compose.yaml with the new tag
-        sed -i "s/:latest/:$DRONE_TAG/g" docker-compose.yaml
         RELEASE=$(gh release list | grep "^$DRONE_TAG " | head -n 1 | awk '{print $1}')
         if [ -n "$RELEASE" ]; then
-          echo "Uploading helix binaries and docker-compose.yaml to release $RELEASE"
-          gh release upload "$RELEASE" helix-linux-amd64 helix-linux-arm64 helix-darwin-amd64 helix-darwin-arm64 docker-compose.yaml
+          echo "Uploading helix binaries, installer, and docker-compose.yaml to release $RELEASE"
+          gh release upload "$RELEASE" helix-linux-amd64 helix-linux-arm64 helix-darwin-amd64 helix-darwin-arm64 helix-windows-amd64.exe docker-compose.yaml
         else
           echo "No matching release found for tag $DRONE_TAG"
         fi
@@ -96,13 +99,6 @@ services:
   image: apache/tika:2.9.2.1
 - name: chrome
   image: ghcr.io/go-rod/rod:v0.115.0
-  command: [
-    "chrome",
-    "--headless",
-    "--no-sandbox",
-    "--remote-debugging-port=9222",
-    "--remote-debugging-address=0.0.0.0"
-  ]
 
 ---
 kind: pipeline
@@ -128,7 +124,7 @@ steps:
     password:
       from_secret: helix_registry_password
     build_args:
-      - APP_VERSION=${DRONE_TAG:-${DRONE_COMMIT_SHA:-latest}} # Required for sentry
+      - APP_VERSION=${DRONE_TAG:-${DRONE_COMMIT_SHA:-latest}}
   volumes:
   - name: dockersocket
     path: /var/run/docker.sock
@@ -166,7 +162,8 @@ steps:
       # Runner with no baked models = empty
       # See https://github.com/helixml/base-images
       # and https://github.com/helixml/base-images/releases
-      - TAG=2024-10-13a-empty
+      - TAG=2024-10-16b-empty
+      - APP_VERSION=${DRONE_TAG:-${DRONE_COMMIT_SHA:-latest}}
     username: admin
     password:
       from_secret: helix_registry_password
@@ -207,7 +204,8 @@ steps:
       # Runner with small models = small
       # See https://github.com/helixml/base-images
       # and https://github.com/helixml/base-images/releases
-      - TAG=2024-10-13a-small
+      - TAG=2024-10-16b-small
+      - APP_VERSION=${DRONE_TAG:-${DRONE_COMMIT_SHA:-latest}}
     username: admin
     password:
       from_secret: helix_registry_password
@@ -234,7 +232,8 @@ steps:
       # Runner with small models = small
       # See https://github.com/helixml/base-images
       # and https://github.com/helixml/base-images/releases
-      - TAG=2024-10-13a-small
+      - TAG=2024-10-16b-small
+      - APP_VERSION=${DRONE_TAG:-${DRONE_COMMIT_SHA:-latest}}
     username: admin
     password:
       from_secret: helix_registry_password
@@ -278,7 +277,8 @@ steps:
       # Runner with large models = large
       # See https://github.com/helixml/base-images
       # and https://github.com/helixml/base-images/releases
-      - TAG=2024-10-13a-large
+      - TAG=2024-10-16b-large
+      - APP_VERSION=${DRONE_TAG:-${DRONE_COMMIT_SHA:-latest}}
     username: admin
     password:
       from_secret: helix_registry_password
@@ -305,7 +305,8 @@ steps:
       # Runner with large models = large
       # See https://github.com/helixml/base-images
       # and https://github.com/helixml/base-images/releases
-      - TAG=2024-10-13a-large
+      - TAG=2024-10-16b-large
+      - APP_VERSION=${DRONE_TAG:-${DRONE_COMMIT_SHA:-latest}}
     username: admin
     password:
       from_secret: helix_registry_password
@@ -465,3 +466,18 @@ steps:
 
 depends_on:
 - default
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

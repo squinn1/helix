@@ -21,7 +21,8 @@ COPY . .
 
 # Build the Go app
 # RUN go mod tidy && go mod download && CGO_ENABLED=0 go build -ldflags "-s -w" -o /helix
-RUN --mount=type=cache,target=/root/.cache/go-build --mount=type=cache,target=/go/pkg/mod CGO_ENABLED=0 go build -ldflags "-s -w" -o /helix
+ARG APP_VERSION="v0.0.0+unknown"
+RUN --mount=type=cache,target=/root/.cache/go-build --mount=type=cache,target=/go/pkg/mod CGO_ENABLED=0 go build -ldflags "-s -w -X github.com/helixml/helix/api/pkg/data.Version=$APP_VERSION" -o /helix
 
 
 ### RUNNER CONTAINER
@@ -30,7 +31,7 @@ FROM registry.helix.ml/helix/runner-base:${TAG}
 
 # Install ollama
 RUN TEMP_DIR=$(mktemp -d /tmp/ollama_install_XXXXXX) && \
-    curl --retry 5 -L https://github.com/ollama/ollama/releases/download/v0.3.12/ollama-linux-amd64.tgz -o $TEMP_DIR/ollama.tgz && \
+    curl --retry 5 -L https://github.com/ollama/ollama/releases/download/v0.3.13/ollama-linux-amd64.tgz -o $TEMP_DIR/ollama.tgz && \
     tar -xzf $TEMP_DIR/ollama.tgz -C $TEMP_DIR && \
     mv $TEMP_DIR/bin/ollama /usr/bin/ollama && \
     chmod +x /usr/bin/ollama && \

@@ -84,7 +84,7 @@ func (suite *OpenAIChatSuite) SetupTest() {
 		Filestore:       filestoreMock,
 		Extractor:       extractorMock,
 		RAG:             suite.rag,
-		Scheduler:       scheduler.NewScheduler(cfg),
+		Scheduler:       scheduler.NewScheduler(context.Background(), cfg, nil),
 	})
 	suite.NoError(err)
 
@@ -320,6 +320,9 @@ func (suite *OpenAIChatSuite) TestChatCompletions_App_Blocking() {
 	}
 
 	suite.store.EXPECT().GetApp(gomock.Any(), "app123").Return(app, nil).Times(1)
+	suite.store.EXPECT().ListSecrets(gomock.Any(), &store.ListSecretsQuery{
+		Owner: suite.userID,
+	}).Return([]*types.Secret{}, nil)
 
 	req, err := http.NewRequest("POST", "/v1/chat/completions?app_id=app123", bytes.NewBufferString(`{
 		"model": "meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo",
@@ -406,6 +409,9 @@ func (suite *OpenAIChatSuite) TestChatCompletions_App_HelixModel() {
 	}
 
 	suite.store.EXPECT().GetApp(gomock.Any(), "app123").Return(app, nil).Times(1)
+	suite.store.EXPECT().ListSecrets(gomock.Any(), &store.ListSecretsQuery{
+		Owner: suite.userID,
+	}).Return([]*types.Secret{}, nil)
 
 	req, err := http.NewRequest("POST", "/v1/chat/completions?app_id=app123", bytes.NewBufferString(`{		
 		"stream": false,
@@ -494,6 +500,9 @@ func (suite *OpenAIChatSuite) TestChatCompletions_AppRag_Blocking() {
 	}
 
 	suite.store.EXPECT().GetApp(gomock.Any(), "app123").Return(app, nil).Times(1)
+	suite.store.EXPECT().ListSecrets(gomock.Any(), &store.ListSecretsQuery{
+		Owner: suite.userID,
+	}).Return([]*types.Secret{}, nil)
 
 	suite.store.EXPECT().GetDataEntity(gomock.Any(), ragSourceID).Return(&types.DataEntity{
 		Owner: suite.userID,
@@ -544,6 +553,11 @@ func (suite *OpenAIChatSuite) TestChatCompletions_AppRag_Blocking() {
 
 	suite.openAiClient.EXPECT().CreateChatCompletion(gomock.Any(), gomock.Any()).
 		DoAndReturn(func(ctx context.Context, req oai.ChatCompletionRequest) (oai.ChatCompletionResponse, error) {
+			// Get the app id from the context
+			appID, ok := openai.GetContextAppID(ctx)
+			suite.True(ok)
+			suite.Equal("app123", appID)
+
 			suite.Equal("meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo", req.Model)
 
 			suite.Require().Equal(2, len(req.Messages))
@@ -610,6 +624,9 @@ func (suite *OpenAIChatSuite) TestChatCompletions_AppFromAuth_Blocking() {
 	}
 
 	suite.store.EXPECT().GetApp(gomock.Any(), "app123").Return(app, nil).Times(2)
+	suite.store.EXPECT().ListSecrets(gomock.Any(), &store.ListSecretsQuery{
+		Owner: suite.userID,
+	}).Return([]*types.Secret{}, nil)
 
 	req, err := http.NewRequest("POST", "/v1/chat/completions", bytes.NewBufferString(`{
 		"model": "meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo",
@@ -703,6 +720,9 @@ func (suite *OpenAIChatSuite) TestChatCompletions_App_Streaming() {
 	}
 
 	suite.store.EXPECT().GetApp(gomock.Any(), "app123").Return(app, nil).Times(1)
+	suite.store.EXPECT().ListSecrets(gomock.Any(), &store.ListSecretsQuery{
+		Owner: suite.userID,
+	}).Return([]*types.Secret{}, nil)
 
 	req, err := http.NewRequest("POST", "/v1/chat/completions?app_id=app123", bytes.NewBufferString(`{	
 		"stream": true,

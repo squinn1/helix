@@ -47,8 +47,8 @@ func ListModels(ctx context.Context) ([]model.OpenAIModel, error) {
 	return HelixModels, nil
 }
 
-func (c *InternalHelixServer) CreateChatCompletion(ctx context.Context, request openai.ChatCompletionRequest) (openai.ChatCompletionResponse, error) {
-	ctx, cancel := context.WithTimeout(ctx, chatCompletionTimeout)
+func (c *InternalHelixServer) CreateChatCompletion(requestCtx context.Context, request openai.ChatCompletionRequest) (openai.ChatCompletionResponse, error) {
+	ctx, cancel := context.WithTimeout(requestCtx, chatCompletionTimeout)
 	defer cancel()
 
 	requestID := system.GenerateRequestID()
@@ -97,7 +97,7 @@ func (c *InternalHelixServer) CreateChatCompletion(ctx context.Context, request 
 	defer sub.Unsubscribe()
 
 	// Enqueue the request, it will be picked up by the runner
-	c.enqueueRequest(&types.RunnerLLMInferenceRequest{
+	err = c.enqueueRequest(&types.RunnerLLMInferenceRequest{
 		RequestID:     requestID,
 		CreatedAt:     time.Now(),
 		OwnerID:       vals.OwnerID,
@@ -105,11 +105,25 @@ func (c *InternalHelixServer) CreateChatCompletion(ctx context.Context, request 
 		InteractionID: vals.InteractionID,
 		Request:       &request,
 	})
+	if err != nil {
+		return openai.ChatCompletionResponse{}, fmt.Errorf("error enqueuing request: %w", err)
+	}
 
 	// Wait for the response or until the context is done (timeout)
 	select {
 	case <-doneCh:
+	case <-requestCtx.Done():
+		// If this happens, the request has been cancelled, release the allocation
+		err := c.scheduler.Release(requestID)
+		if err != nil {
+			log.Error().Err(err).Msg("error releasing allocation")
+		}
+		return openai.ChatCompletionResponse{}, fmt.Errorf("request was cancelled")
 	case <-ctx.Done():
+		// If this happens, we have timed out
+		log.Warn().
+			Str("request_id", requestID).
+			Msg("timeout waiting for runner response, releasing allocation")
 		err := c.scheduler.Release(requestID)
 		if err != nil {
 			log.Error().Err(err).Msg("error releasing allocation")
@@ -144,6 +158,9 @@ func (c *InternalHelixServer) CreateChatCompletionStream(ctx context.Context, re
 	}
 
 	doneCh := make(chan struct{})
+	readyCh := make(chan struct{})
+	firstRun := true
+	var respError error
 
 	pr, pw := io.Pipe()
 
@@ -168,6 +185,18 @@ func (c *InternalHelixServer) CreateChatCompletionStream(ctx context.Context, re
 			return fmt.Errorf("error unmarshalling runner response: %w", err)
 		}
 
+		if runnerResp.Error != "" {
+			respError = fmt.Errorf("runner error: %s", runnerResp.Error)
+		}
+
+		// First chunk received, ready to return the stream or the error
+		// This MUST be done before the writeChunk call, otherwise it will block waiting for the
+		// reader to start
+		if firstRun {
+			close(readyCh)
+			firstRun = false
+		}
+
 		if runnerResp.StreamResponse != nil {
 			bts, err := json.Marshal(runnerResp.StreamResponse)
 			if err != nil {
@@ -180,7 +209,7 @@ func (c *InternalHelixServer) CreateChatCompletionStream(ctx context.Context, re
 			}
 		}
 
-		if runnerResp.Done {
+		if runnerResp.Done || runnerResp.Error != "" {
 			close(doneCh)
 
 			// Ensure the buffer gets EOF so it stops reading
@@ -194,7 +223,7 @@ func (c *InternalHelixServer) CreateChatCompletionStream(ctx context.Context, re
 	}
 
 	// Enqueue the request, it will be picked up by the runner
-	c.enqueueRequest(&types.RunnerLLMInferenceRequest{
+	err = c.enqueueRequest(&types.RunnerLLMInferenceRequest{
 		RequestID:     requestID,
 		CreatedAt:     time.Now(),
 		OwnerID:       vals.OwnerID,
@@ -202,6 +231,9 @@ func (c *InternalHelixServer) CreateChatCompletionStream(ctx context.Context, re
 		InteractionID: vals.InteractionID,
 		Request:       &request,
 	})
+	if err != nil {
+		return nil, fmt.Errorf("error enqueuing request: %w", err)
+	}
 
 	go func() {
 		ctx, cancel := context.WithTimeout(ctx, chatCompletionTimeout)
@@ -212,7 +244,16 @@ func (c *InternalHelixServer) CreateChatCompletionStream(ctx context.Context, re
 	}()
 
 	// Initiate through our client
-	return client.CreateChatCompletionStream(ctx, request)
+	stream, err := client.CreateChatCompletionStream(ctx, request)
+
+	// Wait for the ready signal
+	<-readyCh
+
+	if respError != nil {
+		return nil, respError
+	}
+
+	return stream, err
 }
 
 // NewOpenAIStreamingAdapter returns a new OpenAI streaming adapter which allows

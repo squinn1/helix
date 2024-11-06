@@ -14,6 +14,7 @@ require (
 	github.com/bwmarrin/discordgo v0.28.1
 	github.com/davecgh/go-spew v1.1.1
 	github.com/doug-martin/goqu/v9 v9.19.0
+	github.com/drone/envsubst v1.0.3
 	github.com/dustin/go-humanize v1.0.1
 	github.com/getkin/kin-openapi v0.127.0
 	github.com/getsentry/sentry-go v0.25.0
@@ -240,7 +241,7 @@ require (
 	golang.org/x/oauth2 v0.21.0
 	golang.org/x/sync v0.8.0 // indirect
 	golang.org/x/sys v0.25.0 // indirect
-	golang.org/x/term v0.24.0 // indirect
+	golang.org/x/term v0.24.0
 	golang.org/x/text v0.18.0 // indirect
 	golang.org/x/time v0.5.0 // indirect
 	golang.org/x/tools v0.25.0 // indirect
