@@ -159,7 +159,7 @@ func NewInMemoryNats() (*Nats, error) {
 
 	cfg := &config.ServerConfig{}
 	cfg.PubSub.StoreDir = tmpDir
-	cfg.PubSub.Server.Host = "127.0.0.1"
+	cfg.PubSub.Server.Host = "0.0.0.0"
 	cfg.PubSub.Server.Port = server.RANDOM_PORT
 	cfg.PubSub.Server.JetStream = true
 	cfg.PubSub.Server.MaxPayload = 32 * 1024 * 1024 // 32MB
@@ -181,11 +181,37 @@ func (n *Nats) Subscribe(_ context.Context, topic string, handler func(payload [
 	return sub, nil
 }
 
+func (n *Nats) SubscribeWithCtx(_ context.Context, topic string, handler func(ctx context.Context, msg *nats.Msg) error) (Subscription, error) {
+	sub, err := n.conn.Subscribe(topic, func(msg *nats.Msg) {
+		err := handler(context.Background(), msg)
+		if err != nil {
+			log.Err(err).Msg("error handling message")
+		}
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return sub, nil
+}
+
 func (n *Nats) Publish(_ context.Context, topic string, payload []byte) error {
 	return n.conn.Publish(topic, payload)
 }
 
-func (n *Nats) Request(ctx context.Context, _, subject string, payload []byte, header map[string]string, timeout time.Duration) ([]byte, error) {
+func (n *Nats) Request(ctx context.Context, sub string, payload []byte, timeout time.Duration) ([]byte, error) {
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	msg, err := n.conn.RequestWithContext(ctx, sub, payload)
+	if err != nil {
+		return nil, fmt.Errorf("failed to request message: %w", err)
+	}
+
+	return msg.Data, nil
+}
+
+func (n *Nats) QueueRequest(ctx context.Context, _, subject string, payload []byte, header map[string]string, timeout time.Duration) ([]byte, error) {
 	replyInbox := nats.NewInbox()
 	var dataCh = make(chan []byte)
 

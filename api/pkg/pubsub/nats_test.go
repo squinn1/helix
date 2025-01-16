@@ -261,7 +261,7 @@ func TestQueueMultipleSubs(t *testing.T) {
 	defer sub2.Unsubscribe()
 
 	for i := 0; i < 100; i++ {
-		data, err := pubsub.Request(ctx, ScriptRunnerStream, AppQueue, []byte(fmt.Sprintf("hello-%d", i)), map[string]string{}, 10*time.Second)
+		data, err := pubsub.QueueRequest(ctx, ScriptRunnerStream, AppQueue, []byte(fmt.Sprintf("hello-%d", i)), map[string]string{}, 10*time.Second)
 		require.NoError(t, err)
 
 		require.Equal(t, "world", string(data))

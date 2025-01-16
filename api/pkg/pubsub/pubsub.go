@@ -15,13 +15,10 @@ type Publisher interface {
 type PubSub interface {
 	Publisher
 	Subscribe(ctx context.Context, topic string, handler func(payload []byte) error) (Subscription, error)
-
-	// Request sends a request to a topic and waits for a response. Should be used for fast, ephemeral workloads
-	Request(ctx context.Context, stream, sub string, payload []byte, header map[string]string, timeout time.Duration) ([]byte, error)
-	// QueueSubscribe subscribes to a topic with a queue group. Should be used for fast workloads, failed
-	// messages will not be redelivered. Slow consumers will block the queue group.
+	SubscribeWithCtx(ctx context.Context, topic string, handler func(ctx context.Context, msg *nats.Msg) error) (Subscription, error)
+	Request(ctx context.Context, sub string, payload []byte, timeout time.Duration) ([]byte, error)
+	QueueRequest(ctx context.Context, stream, sub string, payload []byte, header map[string]string, timeout time.Duration) ([]byte, error)
 	QueueSubscribe(ctx context.Context, stream, sub string, handler func(msg *Message) error) (Subscription, error)
-
 	StreamRequest(ctx context.Context, stream, sub string, payload []byte, header map[string]string, timeout time.Duration) ([]byte, error)
 	StreamConsume(ctx context.Context, stream, sub string, handler func(msg *Message) error) (Subscription, error)
 }
@@ -77,6 +74,7 @@ func GetSessionQueue(ownerID, sessionID string) string {
 const (
 	ScriptRunnerStream = "SCRIPTS"
 	AppQueue           = "apps"
+	RunnerQueue        = "runner"
 )
 
 func getStreamSub(stream, sub string) string {
@@ -85,4 +83,8 @@ func getStreamSub(stream, sub string) string {
 
 func GetRunnerResponsesQueue(ownerID, reqID string) string {
 	return "runner-responses." + ownerID + "." + reqID
+}
+
+func GetRunnerQueue(runnerID string) string {
+	return RunnerQueue + "." + runnerID
 }
