@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/helixml/helix/api/pkg/config"
 	"github.com/nats-io/nats-server/v2/server"
 	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/jetstream"
@@ -26,40 +27,65 @@ type Nats struct {
 
 	consumerMu sync.Mutex
 	consumer   jetstream.Consumer
+
+	// Keep track of the embedded server if we're running one
+	embeddedServer *server.Server
 }
 
-func NewInMemoryNats() (*Nats, error) {
-	tmpDir, err := os.MkdirTemp(os.TempDir(), "helix-nats")
-	if err != nil {
-		return nil, fmt.Errorf("failed to create temp dir: %w", err)
+// NewNats creates a new NATS instance with the given configuration
+func NewNats(cfg *config.ServerConfig) (*Nats, error) {
+	var ns *server.Server
+	var err error
+
+	// Falback to runner token if no token is provided
+	if cfg.PubSub.Server.Token == "" {
+		cfg.PubSub.Server.Token = cfg.WebServer.RunnerToken
 	}
 
-	opts := &server.Options{
-		Host:      "127.0.0.1",
-		Port:      server.RANDOM_PORT,
-		NoSigs:    true,
-		JetStream: true,
-		StoreDir:  tmpDir,
-		// Setting payload to 32 MB
-		MaxPayload: 32 * 1024 * 1024,
-	}
+	// Create and start embedded server if we're not connecting to an external one
+	if cfg.PubSub.Server.Host == "0.0.0.0" {
+		opts := &server.Options{
+			Host:          cfg.PubSub.Server.Host,
+			Port:          cfg.PubSub.Server.Port,
+			JetStream:     cfg.PubSub.Server.JetStream,
+			StoreDir:      cfg.PubSub.StoreDir,
+			MaxPayload:    int32(cfg.PubSub.Server.MaxPayload),
+			Authorization: cfg.PubSub.Server.Token,
+		}
 
-	// Initialize new server with options
-	ns, err := server.NewServer(opts)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create in-memory nats server: %w", err)
-	}
+		// Initialize new server with options
+		ns, err = server.NewServer(opts)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create nats server: %w", err)
+		}
 
-	// Start the server via goroutine
-	go ns.Start()
+		// Start the server via goroutine
+		go ns.Start()
 
-	// Wait for server to be ready for connections
-	if !ns.ReadyForConnections(4 * time.Second) {
-		return nil, fmt.Errorf("failed to start in-memory nats server")
+		// Wait for server to be ready for connections
+		if !ns.ReadyForConnections(4 * time.Second) {
+			return nil, fmt.Errorf("failed to start nats server")
+		}
 	}
 
 	// Connect to server
-	nc, err := nats.Connect(ns.ClientURL())
+	var nc *nats.Conn
+	if ns != nil {
+		// Connect to embedded server
+		opts := []nats.Option{}
+		if cfg.PubSub.Server.Token != "" {
+			opts = append(opts, nats.Token(cfg.PubSub.Server.Token))
+		}
+		nc, err = nats.Connect(ns.ClientURL(), opts...)
+	} else {
+		// Connect to external server
+		serverURL := fmt.Sprintf("nats://%s:%d", cfg.PubSub.Server.Host, cfg.PubSub.Server.Port)
+		opts := []nats.Option{}
+		if cfg.PubSub.Server.Token != "" {
+			opts = append(opts, nats.Token(cfg.PubSub.Server.Token))
+		}
+		nc, err = nats.Connect(serverURL, opts...)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to nats: %w", err)
 	}
@@ -76,12 +102,8 @@ func NewInMemoryNats() (*Nats, error) {
 		Name:      scriptStreamName,
 		Subjects:  []string{scriptsSubject},
 		Retention: jetstream.WorkQueuePolicy,
-		// Storage:   jetstream.MemoryStorage,
-		Discard: jetstream.DiscardOld,
-		MaxAge:  5 * time.Minute, // Discard messages older than 5 minutes
-		// ConsumerLimits: jetstream.StreamConsumerLimits{
-		// 	MaxAckPending: 20,
-		// },
+		Discard:   jetstream.DiscardOld,
+		MaxAge:    5 * time.Minute, // Discard messages older than 5 minutes
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to create internal jetstream stream: %w", err)
@@ -92,8 +114,7 @@ func NewInMemoryNats() (*Nats, error) {
 		AckPolicy:      jetstream.AckExplicitPolicy,
 		FilterSubjects: []string{getStreamSub(ScriptRunnerStream, AppQueue)},
 		AckWait:        5 * time.Second,
-		// MemoryStorage:  true,
-		ReplayPolicy: jetstream.ReplayInstantPolicy,
+		ReplayPolicy:   jetstream.ReplayInstantPolicy,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to create consumer: %w", err)
@@ -121,11 +142,29 @@ func NewInMemoryNats() (*Nats, error) {
 	}()
 
 	return &Nats{
-		conn:     nc,
-		js:       js,
-		stream:   stream,
-		consumer: c,
+		conn:           nc,
+		js:             js,
+		stream:         stream,
+		consumer:       c,
+		embeddedServer: ns,
 	}, nil
+}
+
+// NewInMemoryNats creates a new in-memory NATS instance for testing
+func NewInMemoryNats() (*Nats, error) {
+	tmpDir, err := os.MkdirTemp(os.TempDir(), "helix-nats")
+	if err != nil {
+		return nil, fmt.Errorf("failed to create temp dir: %w", err)
+	}
+
+	cfg := &config.ServerConfig{}
+	cfg.PubSub.StoreDir = tmpDir
+	cfg.PubSub.Server.Host = "127.0.0.1"
+	cfg.PubSub.Server.Port = server.RANDOM_PORT
+	cfg.PubSub.Server.JetStream = true
+	cfg.PubSub.Server.MaxPayload = 32 * 1024 * 1024 // 32MB
+
+	return NewNats(cfg)
 }
 
 func (n *Nats) Subscribe(_ context.Context, topic string, handler func(payload []byte) error) (Subscription, error) {

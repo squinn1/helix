@@ -190,9 +190,9 @@ func serve(cmd *cobra.Command, cfg *config.ServerConfig) error {
 		return err
 	}
 
-	ps, err := pubsub.New(cfg.PubSub.StoreDir)
+	ps, err := pubsub.New(cfg)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to create pubsub provider: %w", err)
 	}
 
 	if cfg.WebServer.RunnerToken == "" {
