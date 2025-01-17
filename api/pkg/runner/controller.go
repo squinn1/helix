@@ -191,7 +191,7 @@ func (r *Runner) Initialize(ctx context.Context) error {
 }
 
 // this should be run in a go-routine
-func (r *Runner) Run() {
+func (r *Runner) Run(ctx context.Context) {
 	err := r.warmupInference(context.Background())
 	if err != nil {
 		log.Error().Msgf("error in warmup inference: %s", err.Error())
@@ -202,6 +202,14 @@ func (r *Runner) Run() {
 
 	go r.startTaskLoop()
 	go r.startReportStateLoop()
+
+	log.Info().Msgf("🟢 starting runner server on %s:%d", r.Options.WebServer.Host, r.Options.WebServer.Port)
+	go func() {
+		err := r.server.ListenAndServe(ctx, nil)
+		if err != nil {
+			panic(err)
+		}
+	}()
 }
 
 func (r *Runner) startTaskLoop() {

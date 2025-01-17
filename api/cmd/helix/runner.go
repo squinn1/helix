@@ -44,8 +44,8 @@ func NewRunnerOptions() *RunnerOptions {
 			MaxModelInstances:            getDefaultServeOptionInt("MAX_MODEL_INSTANCES", 0),
 			CacheDir:                     getDefaultServeOptionString("CACHE_DIR", "/root/.cache/huggingface"), // TODO: change to maybe just /data
 			WebServer: runner.WebServer{
-				Host: getDefaultServeOptionString("API_HOST", "127.0.0.1"),
-				Port: getDefaultServeOptionInt("API_PORT", 8080),
+				Host: getDefaultServeOptionString("SERVER_HOST", "127.0.0.1"),
+				Port: getDefaultServeOptionInt("SERVER_PORT", 80),
 			},
 		},
 		Janitor: config.Janitor{
@@ -307,7 +307,7 @@ func runnerCLI(cmd *cobra.Command, options *RunnerOptions) error {
 		return err
 	}
 
-	go runnerController.Run()
+	go runnerController.Run(ctx)
 
 	<-ctx.Done()
 	return nil
