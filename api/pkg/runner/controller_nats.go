@@ -1,8 +1,11 @@
 package runner
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"io"
+	"net/http"
 
 	"github.com/helixml/helix/api/pkg/pubsub"
 	"github.com/helixml/helix/api/pkg/types"
@@ -46,16 +49,33 @@ func (c *NatsController) handler(ctx context.Context, msg *nats.Msg) error {
 
 	log.Trace().Str("method", req.Method).Str("url", req.URL).Msg("received request")
 
-	// TODO(PHIL): Implement request handling
+	// Execute the task via an HTTP handler
+	response := executeTaskViaHTTP(req)
 
-	response := &types.Response{
-		StatusCode: 200,
-		Body:       "ok",
-	}
 	responseBytes, err := json.Marshal(response)
 	if err != nil {
 		return err
 	}
 	msg.Respond(responseBytes)
 	return nil
+}
+
+func executeTaskViaHTTP(task types.Request) *types.Response {
+	req, err := http.NewRequest(task.Method, "http://localhost:9000"+task.URL, bytes.NewBuffer([]byte(task.Body)))
+	if err != nil {
+		return &types.Response{StatusCode: 500, Body: "Internal Error"}
+	}
+
+	client := &http.Client{}
+	resp, err := client.Do(req)
+	if err != nil {
+		return &types.Response{StatusCode: 500, Body: "Internal Error"}
+	}
+	defer resp.Body.Close()
+
+	body, _ := io.ReadAll(resp.Body)
+	return &types.Response{
+		StatusCode: resp.StatusCode,
+		Body:       string(body),
+	}
 }

@@ -89,6 +89,13 @@ type Options struct {
 	MaxModelInstances int
 
 	RuntimeFactory SlotFactory
+
+	WebServer WebServer
+}
+
+type WebServer struct {
+	Host string `envconfig:"SERVER_HOST" default:"127.0.0.1" description:"The host to bind the api server to."`
+	Port int    `envconfig:"SERVER_PORT" default:"80" description:""`
 }
 
 type Runner struct {
@@ -99,6 +106,7 @@ type Runner struct {
 	websocketEventChannel chan *types.WebsocketEvent          // how we write web sockets messages to the api server
 	slots                 map[uuid.UUID]*Slot                 // A map recording the slots running on this runner
 	slotFactory           SlotFactory                         // A factory to create new slots. Required for testing since we don't actually want to spin up ollama on each test
+	server                *HelixRunnerAPIServer
 }
 
 func NewRunner(
@@ -133,6 +141,15 @@ func NewRunner(
 	if options.MemoryBytes == 0 {
 		return nil, fmt.Errorf("memory is required")
 	}
+
+	server, err := NewHelixRunnerAPIServer(&RunnerServerOptions{
+		Host: options.WebServer.Host,
+		Port: options.WebServer.Port,
+	})
+	if err != nil {
+		return nil, err
+	}
+
 	runner := &Runner{
 		Ctx:     ctx,
 		Options: options,
@@ -144,6 +161,7 @@ func NewRunner(
 		websocketEventChannel: make(chan *types.WebsocketEvent),
 		slots:                 make(map[uuid.UUID]*Slot),
 		slotFactory:           options.RuntimeFactory,
+		server:                server,
 	}
 	return runner, nil
 }

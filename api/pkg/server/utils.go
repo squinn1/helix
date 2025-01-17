@@ -41,7 +41,7 @@ func (lrw *LoggingResponseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) 
 	return hijacker.Hijack()
 }
 
-func errorLoggingMiddleware(next http.Handler) http.Handler {
+func ErrorLoggingMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Wrap the ResponseWriter
 		lrw := NewLoggingResponseWriter(w)
