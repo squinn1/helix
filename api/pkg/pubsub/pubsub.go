@@ -2,6 +2,8 @@ package pubsub
 
 import (
 	"context"
+	"fmt"
+	"strings"
 	"time"
 
 	"github.com/nats-io/nats.go"
@@ -87,4 +89,16 @@ func GetRunnerResponsesQueue(ownerID, reqID string) string {
 
 func GetRunnerQueue(runnerID string) string {
 	return RunnerQueue + "." + runnerID
+}
+
+func GetRunnerConnectedQueue(subject string) string {
+	return "runner.connected." + subject
+}
+
+func ParseRunnerID(subject string) (string, error) {
+	parts := strings.Split(subject, ".")
+	if len(parts) < 3 {
+		return "", fmt.Errorf("invalid subject: %s", subject)
+	}
+	return parts[2], nil
 }

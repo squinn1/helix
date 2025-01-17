@@ -7,30 +7,47 @@ import (
 	"time"
 
 	"github.com/helixml/helix/api/pkg/pubsub"
+	"github.com/helixml/helix/api/pkg/types"
+	"github.com/nats-io/nats.go"
+	"github.com/rs/zerolog/log"
 )
-
-type Request struct {
-	Method string `json:"method"`
-	URL    string `json:"url"`
-	Body   string `json:"body"`
-}
-
-type Response struct {
-	StatusCode int    `json:"status_code"`
-	Body       string `json:"body"`
-}
 
 type RunnerController struct {
 	pubsub pubsub.PubSub
 }
 
-func NewRunnerController(pubsub pubsub.PubSub) *RunnerController {
-	return &RunnerController{
-		pubsub: pubsub,
-	}
+type RunnerConnectedHandler func(id string)
+
+type RunnerControllerConfig struct {
+	PubSub      pubsub.PubSub
+	OnConnected RunnerConnectedHandler
 }
 
-func (r *RunnerController) Send(ctx context.Context, runnerId string, req *Request) (*Response, error) {
+func NewRunnerController(ctx context.Context, cfg *RunnerControllerConfig) (*RunnerController, error) {
+	sub, err := cfg.PubSub.SubscribeWithCtx(context.Background(), pubsub.GetRunnerConnectedQueue("*"), func(ctx context.Context, msg *nats.Msg) error {
+		log.Trace().Str("subject", msg.Subject).Str("data", string(msg.Data)).Msg("runner connected")
+		runnerID, err := pubsub.ParseRunnerID(msg.Subject)
+		if err != nil {
+			log.Error().Err(err).Str("subject", msg.Subject).Msg("error parsing runner ID")
+			return err
+		}
+		cfg.OnConnected(runnerID)
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("error subscribing to runner.connected.*: %w", err)
+	}
+	go func() {
+		<-ctx.Done()
+		sub.Unsubscribe()
+	}()
+
+	return &RunnerController{
+		pubsub: cfg.PubSub,
+	}, nil
+}
+
+func (r *RunnerController) Send(ctx context.Context, runnerId string, req *types.Request) (*types.Response, error) {
 	data, err := json.Marshal(req)
 	if err != nil {
 		return nil, fmt.Errorf("error marshalling request: %w", err)
@@ -42,7 +59,7 @@ func (r *RunnerController) Send(ctx context.Context, runnerId string, req *Reque
 		return nil, fmt.Errorf("error sending request to runner: %w", err)
 	}
 
-	var resp Response
+	var resp types.Response
 	if err := json.Unmarshal(response, &resp); err != nil {
 		return nil, fmt.Errorf("error unmarshalling response: %w", err)
 	}

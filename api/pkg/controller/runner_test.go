@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/helixml/helix/api/pkg/pubsub"
+	"github.com/helixml/helix/api/pkg/types"
 	"github.com/nats-io/nats.go"
 	"github.com/stretchr/testify/require"
 )
@@ -15,12 +16,15 @@ func TestSendToRunner(t *testing.T) {
 	ps, err := pubsub.NewInMemoryNats()
 	require.NoError(t, err)
 
-	ctrl := NewRunnerController(ps)
+	ctrl, err := NewRunnerController(context.Background(), &RunnerControllerConfig{
+		PubSub: ps,
+	})
+	require.NoError(t, err)
 
 	mockRunnerID := "test"
 
 	mockRunner, err := ps.SubscribeWithCtx(context.Background(), pubsub.GetRunnerQueue(mockRunnerID), func(ctx context.Context, msg *nats.Msg) error {
-		response := &Response{
+		response := &types.Response{
 			StatusCode: 200,
 			Body:       "test",
 		}
@@ -35,7 +39,7 @@ func TestSendToRunner(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
 	defer cancel()
 
-	response, err := ctrl.Send(ctx, mockRunnerID, &Request{
+	response, err := ctrl.Send(ctx, mockRunnerID, &types.Request{
 		Method: "GET",
 		URL:    "https://example.com",
 		Body:   "{}",
@@ -50,12 +54,15 @@ func TestSendNoRunner(t *testing.T) {
 	ps, err := pubsub.NewInMemoryNats()
 	require.NoError(t, err)
 
-	ctrl := NewRunnerController(ps)
+	ctrl, err := NewRunnerController(context.Background(), &RunnerControllerConfig{
+		PubSub: ps,
+	})
+	require.NoError(t, err)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Millisecond)
 	defer cancel()
 
-	_, err = ctrl.Send(ctx, "snowman", &Request{
+	_, err = ctrl.Send(ctx, "snowman", &types.Request{
 		Method: "GET",
 		URL:    "https://example.com",
 		Body:   "{}",
