@@ -167,6 +167,17 @@ func NewInMemoryNats() (*Nats, error) {
 	return NewNats(cfg)
 }
 
+func NewNatsClient(url string, token string) (*Nats, error) {
+	nc, err := nats.Connect(url, nats.Token(token))
+	if err != nil {
+		return nil, fmt.Errorf("failed to connect to nats: %w", err)
+	}
+
+	return &Nats{
+		conn: nc,
+	}, nil
+}
+
 func (n *Nats) Subscribe(_ context.Context, topic string, handler func(payload []byte) error) (Subscription, error) {
 	sub, err := n.conn.Subscribe(topic, func(msg *nats.Msg) {
 		err := handler(msg.Data)

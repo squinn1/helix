@@ -15,6 +15,7 @@ import (
 	"github.com/hashicorp/go-retryablehttp"
 	"github.com/helixml/helix/api/pkg/config"
 	"github.com/helixml/helix/api/pkg/data"
+	"github.com/helixml/helix/api/pkg/pubsub"
 	"github.com/helixml/helix/api/pkg/scheduler"
 	"github.com/helixml/helix/api/pkg/server"
 	"github.com/helixml/helix/api/pkg/system"
@@ -107,6 +108,7 @@ type Runner struct {
 	slots                 map[uuid.UUID]*Slot                 // A map recording the slots running on this runner
 	slotFactory           SlotFactory                         // A factory to create new slots. Required for testing since we don't actually want to spin up ollama on each test
 	server                *HelixRunnerAPIServer
+	pubsub                pubsub.PubSub
 }
 
 func NewRunner(
@@ -150,6 +152,11 @@ func NewRunner(
 		return nil, err
 	}
 
+	ps, err := pubsub.NewNatsClient("localhost:4222", options.APIToken)
+	if err != nil {
+		return nil, err
+	}
+
 	runner := &Runner{
 		Ctx:     ctx,
 		Options: options,
@@ -162,6 +169,7 @@ func NewRunner(
 		slots:                 make(map[uuid.UUID]*Slot),
 		slotFactory:           options.RuntimeFactory,
 		server:                server,
+		pubsub:                ps,
 	}
 	return runner, nil
 }
@@ -203,13 +211,28 @@ func (r *Runner) Run(ctx context.Context) {
 	go r.startTaskLoop()
 	go r.startReportStateLoop()
 
-	log.Info().Msgf("🟢 starting runner server on %s:%d", r.Options.WebServer.Host, r.Options.WebServer.Port)
+	log.Info().Msgf("Starting runner server on %s:%d", r.Options.WebServer.Host, r.Options.WebServer.Port)
 	go func() {
 		err := r.server.ListenAndServe(ctx, nil)
 		if err != nil {
 			panic(err)
 		}
 	}()
+
+	log.Info().Str("runner_id", r.Options.ID).Msg("Starting NATS controller")
+	go func() {
+		serverURL := fmt.Sprintf("http://%s:%d", r.Options.WebServer.Host, r.Options.WebServer.Port)
+		_, err := NewNatsController(ctx, &NatsControllerConfig{
+			PS:        r.pubsub,
+			ServerURL: serverURL,
+			RunnerID:  r.Options.ID,
+		})
+		if err != nil {
+			panic(err)
+		}
+		<-ctx.Done()
+	}()
+
 }
 
 func (r *Runner) startTaskLoop() {

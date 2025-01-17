@@ -23,6 +23,10 @@ func TestControllerDetectsNewRunner(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	_, err = NewNatsController(context.Background(), ps, testID)
+	_, err = NewNatsController(context.Background(), &NatsControllerConfig{
+		PS:        ps,
+		ServerURL: "http://localhost:9000",
+		RunnerID:  testID,
+	})
 	require.NoError(t, err)
 }

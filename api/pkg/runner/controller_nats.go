@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"net/url"
 
 	"github.com/helixml/helix/api/pkg/pubsub"
 	"github.com/helixml/helix/api/pkg/types"
@@ -13,16 +14,31 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
-type NatsController struct {
-	pubsub pubsub.PubSub
+type NatsControllerConfig struct {
+	RunnerID  string
+	PS        pubsub.PubSub
+	ServerURL string
 }
 
-func NewNatsController(ctx context.Context, ps pubsub.PubSub, runnerID string) (*NatsController, error) {
-	controller := &NatsController{
-		pubsub: ps,
+type NatsController struct {
+	pubsub    pubsub.PubSub
+	serverURL string
+}
+
+func NewNatsController(ctx context.Context, config *NatsControllerConfig) (*NatsController, error) {
+	// Parse the server URL to make sure it's valid
+	parsedURL, err := url.Parse(config.ServerURL)
+	if err != nil {
+		return nil, err
 	}
 
-	subscription, err := ps.SubscribeWithCtx(ctx, pubsub.GetRunnerQueue(runnerID), controller.handler)
+	controller := &NatsController{
+		pubsub:    config.PS,
+		serverURL: parsedURL.Scheme + "://" + parsedURL.Host, // Just get the scheme and host
+	}
+
+	log.Debug().Str("runner_id", config.RunnerID).Str("queue", pubsub.GetRunnerQueue(config.RunnerID)).Msg("Subscribing to NATS queue")
+	subscription, err := config.PS.SubscribeWithCtx(ctx, pubsub.GetRunnerQueue(config.RunnerID), controller.handler)
 	if err != nil {
 		return nil, err
 	}
@@ -32,8 +48,8 @@ func NewNatsController(ctx context.Context, ps pubsub.PubSub, runnerID string) (
 		subscription.Unsubscribe()
 	}()
 
-	// Publish a message to the runner.connected queue to indicate that the runner is connected
-	err = ps.Publish(ctx, pubsub.GetRunnerConnectedQueue(runnerID), []byte("connected"))
+	log.Debug().Str("runner_id", config.RunnerID).Str("queue", pubsub.GetRunnerConnectedQueue(config.RunnerID)).Msg("Publishing to runner.connected queue")
+	err = config.PS.Publish(ctx, pubsub.GetRunnerConnectedQueue(config.RunnerID), []byte("connected"))
 	if err != nil {
 		return nil, err
 	}
@@ -50,7 +66,7 @@ func (c *NatsController) handler(ctx context.Context, msg *nats.Msg) error {
 	log.Trace().Str("method", req.Method).Str("url", req.URL).Msg("received request")
 
 	// Execute the task via an HTTP handler
-	response := executeTaskViaHTTP(req)
+	response := c.executeTaskViaHTTP(req)
 
 	responseBytes, err := json.Marshal(response)
 	if err != nil {
@@ -60,8 +76,14 @@ func (c *NatsController) handler(ctx context.Context, msg *nats.Msg) error {
 	return nil
 }
 
-func executeTaskViaHTTP(task types.Request) *types.Response {
-	req, err := http.NewRequest(task.Method, "http://localhost:9000"+task.URL, bytes.NewBuffer([]byte(task.Body)))
+func (c *NatsController) executeTaskViaHTTP(task types.Request) *types.Response {
+	// Parse the request URL (so we can just grab the path)
+	parsedURL, err := url.Parse(task.URL)
+	if err != nil {
+		return &types.Response{StatusCode: 400, Body: "Unable to parse request URL"}
+	}
+
+	req, err := http.NewRequest(task.Method, c.serverURL+parsedURL.Path, bytes.NewBuffer([]byte(task.Body)))
 	if err != nil {
 		return &types.Response{StatusCode: 500, Body: "Internal Error"}
 	}
