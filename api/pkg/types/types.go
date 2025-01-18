@@ -735,6 +735,7 @@ type ModelInstanceState struct {
 // the basic struct reported by a runner when it connects
 // and keeps reporting it's status to the api server
 // we expire these records after a certain amount of time
+// Deprecated: RunnerState is deprecated in favor of RunnerStatus
 type RunnerState struct {
 	ID      string    `json:"id"`
 	Created time.Time `json:"created"`

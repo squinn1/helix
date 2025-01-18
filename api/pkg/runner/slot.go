@@ -19,6 +19,9 @@ type SlotFactory interface {
 		sessionResponseHandler func(res *types.RunnerTaskResponse) error,
 		runnerOptions Options,
 	) (*Slot, error)
+	CreateSlot(ctx context.Context,
+		slotRequest *types.CreateRunnerSlotRequest,
+	) (*Slot, error)
 }
 
 // Slot is the crazy mirror equivalent of scheduler.Slot
@@ -94,6 +97,23 @@ func (r *Slot) ErrorWorkload(workload *scheduler.Workload, err error) {
 var _ SlotFactory = &runtimeFactory{}
 
 type runtimeFactory struct{}
+
+func (f *runtimeFactory) CreateSlot(ctx context.Context,
+	slotRequest *types.CreateRunnerSlotRequest,
+) (*Slot, error) {
+	slot := &Slot{
+		ID: slotRequest.ID,
+	}
+	switch slotRequest.Attributes.Runtime {
+	case types.RuntimeOllama:
+		log.Info().Msg("TODO: creating ollama slot")
+		return slot, nil
+	case types.RuntimeDiffusers:
+		log.Info().Msg("TODO: creating diffusers slot")
+		return slot, nil
+	}
+	return nil, fmt.Errorf("unknown runtime: %s", slotRequest.Attributes.Runtime)
+}
 
 func (f *runtimeFactory) NewSlot(ctx context.Context,
 	slotID uuid.UUID,
