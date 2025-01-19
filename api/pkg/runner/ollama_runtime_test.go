@@ -31,7 +31,7 @@ func setupMockCommander(t *testing.T, ctrl *gomock.Controller, port int, cmdFn f
 			// Need to start a dummy server to handle the health check
 			t.Logf("Starting dummy server on port %d", port)
 			go http.ListenAndServe(fmt.Sprintf("127.0.0.1:%d", port), http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				w.WriteHeader(http.StatusOK)
+				w.Write([]byte(`{"version": "test"}`))
 			}))
 			return cmd
 		}
@@ -265,6 +265,103 @@ func TestOllamaRuntime_Stop(t *testing.T) {
 
 			if tt.checkCleanup != nil {
 				tt.checkCleanup(t, runtime)
+			}
+		})
+	}
+}
+
+func TestOllamaRuntime_PullModel(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	tests := []struct {
+		name          string
+		setup         func(t *testing.T) *ollamaRuntime
+		modelName     string
+		expectedError string
+	}{
+		{
+			name: "pull model with real ollama",
+			setup: func(t *testing.T) *ollamaRuntime {
+				// Skip test if ollama is not installed
+				if _, err := exec.LookPath("ollama"); err != nil {
+					t.Skip("ollama not found in PATH, skipping test")
+				}
+
+				runtime, err := NewOllamaRuntime(context.Background(), OllamaRuntimeParams{})
+				require.NoError(t, err)
+				err = runtime.Start(context.Background())
+				require.NoError(t, err)
+				return runtime
+			},
+			modelName:     "nomic-embed-text",
+			expectedError: "",
+		},
+		{
+			name: "pull model with mocked ollama",
+			setup: func(t *testing.T) *ollamaRuntime {
+				port, err := freeport.GetFreePort()
+				require.NoError(t, err)
+
+				setupMockCommander(t, ctrl, port, nil)
+
+				runtime, err := NewOllamaRuntime(context.Background(), OllamaRuntimeParams{
+					Port: &port,
+				})
+				require.NoError(t, err)
+				err = runtime.Start(context.Background())
+				require.NoError(t, err)
+				return runtime
+			},
+			modelName:     "nomic-embed-text",
+			expectedError: "",
+		},
+		{
+			name: "pull without starting runtime",
+			setup: func(t *testing.T) *ollamaRuntime {
+				runtime, err := NewOllamaRuntime(context.Background(), OllamaRuntimeParams{})
+				require.NoError(t, err)
+				return runtime
+			},
+			modelName:     "model1",
+			expectedError: "ollama client not initialized",
+		},
+		{
+			name: "pull with invalid model name",
+			setup: func(t *testing.T) *ollamaRuntime {
+				port, err := freeport.GetFreePort()
+				require.NoError(t, err)
+
+				setupMockCommander(t, ctrl, port, nil)
+
+				runtime, err := NewOllamaRuntime(context.Background(), OllamaRuntimeParams{
+					Port: &port,
+				})
+				require.NoError(t, err)
+				err = runtime.Start(context.Background())
+				require.NoError(t, err)
+				return runtime
+			},
+			modelName:     "",
+			expectedError: "model name cannot be empty",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			runtime := tt.setup(t)
+			err := runtime.PullModel(context.Background(), tt.modelName, func(progress PullProgress) error {
+				t.Logf("Pulling model: %s", progress.Status)
+				return nil
+			})
+
+			if tt.expectedError != "" {
+				assert.Error(t, err)
+				assert.Contains(t, err.Error(), tt.expectedError)
+			} else {
+				assert.NoError(t, err)
+				err = runtime.Stop()
+				assert.NoError(t, err)
 			}
 		})
 	}

@@ -6,12 +6,14 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"time"
 
 	"github.com/helixml/helix/api/pkg/freeport"
 	"github.com/helixml/helix/api/pkg/system"
+	"github.com/ollama/ollama/api"
 	"github.com/rs/zerolog/log"
 	openai "github.com/sashabaranov/go-openai"
 )
@@ -20,7 +22,7 @@ var _ Runtime = &ollamaRuntime{}
 
 type ollamaRuntime struct {
 	openaiClient *openai.Client
-	ollamaClient *ollamaClient
+	ollamaClient *api.Client
 	cacheDir     string
 	cmd          *exec.Cmd
 	cancel       context.CancelFunc
@@ -105,17 +107,17 @@ func (i *ollamaRuntime) Start(ctx context.Context) error {
 	i.cmd = cmd
 
 	// Create ollama client
-	url := fmt.Sprintf("http://localhost:%d", i.port)
-	log.Debug().Str("url", url).Msg("Creating Ollama client")
-	ollamaClient, err := newOllamaClient(url)
+	url, err := url.Parse(fmt.Sprintf("http://localhost:%d", i.port))
 	if err != nil {
-		return fmt.Errorf("error creating Ollama client: %s", err.Error())
+		return fmt.Errorf("error parsing ollama url: %w", err)
 	}
+	log.Debug().Str("url", url.String()).Msg("Creating Ollama client")
+	ollamaClient := api.NewClient(url, http.DefaultClient)
 	i.ollamaClient = ollamaClient
 
 	// Wait for ollama to be ready
-	log.Debug().Str("url", url).Dur("timeout", i.startTimeout).Msg("Waiting for Ollama to start")
-	err = waitUntilOllamaIsReady(ctx, i.port, i.startTimeout)
+	log.Debug().Str("url", url.String()).Dur("timeout", i.startTimeout).Msg("Waiting for Ollama to start")
+	err = i.waitUntilOllamaIsReady(ctx, i.startTimeout)
 	if err != nil {
 		return fmt.Errorf("error waiting for Ollama to start: %s", err.Error())
 	}
@@ -139,7 +141,34 @@ func (i *ollamaRuntime) Stop() error {
 	return nil
 }
 
-func waitUntilOllamaIsReady(ctx context.Context, port int, startTimeout time.Duration) error {
+func (i *ollamaRuntime) PullModel(ctx context.Context, modelName string, pullProgressFunc func(progress PullProgress) error) error {
+	if i.ollamaClient == nil {
+		return fmt.Errorf("ollama client not initialized")
+	}
+
+	// Validate model name
+	if modelName == "" {
+		return fmt.Errorf("model name cannot be empty")
+	}
+
+	log.Info().Msgf("Pulling model: %s", modelName)
+	err := i.ollamaClient.Pull(ctx, &api.PullRequest{
+		Model: modelName,
+	}, func(progress api.ProgressResponse) error {
+		return pullProgressFunc(PullProgress{
+			Status:    progress.Status,
+			Completed: progress.Completed,
+			Total:     progress.Total,
+		})
+	})
+	if err != nil {
+		return fmt.Errorf("error pulling model: %w", err)
+	}
+	log.Info().Msgf("Finished pulling model: %s", modelName)
+	return nil
+}
+
+func (i *ollamaRuntime) waitUntilOllamaIsReady(ctx context.Context, startTimeout time.Duration) error {
 	startCtx, cancel := context.WithTimeout(ctx, startTimeout)
 	defer cancel()
 
@@ -151,15 +180,11 @@ func waitUntilOllamaIsReady(ctx context.Context, port int, startTimeout time.Dur
 		case <-startCtx.Done():
 			return startCtx.Err()
 		case <-ticker.C:
-			resp, err := http.DefaultClient.Get(fmt.Sprintf("http://localhost:%d", port))
+			err := i.ollamaClient.Heartbeat(ctx)
 			if err != nil {
 				continue
 			}
-			resp.Body.Close()
-
-			if resp.StatusCode == http.StatusOK {
-				return nil
-			}
+			return nil
 		}
 	}
 }
