@@ -35,11 +35,11 @@ func NewHelixRunnerAPIServer(
 	cfg *RunnerServerOptions,
 ) (*HelixRunnerAPIServer, error) {
 	if cfg.Host == "" {
-		return nil, fmt.Errorf("server host is required")
+		cfg.Host = "127.0.0.1"
 	}
 
 	if cfg.Port == 0 {
-		return nil, fmt.Errorf("server port is required")
+		cfg.Port = 8080
 	}
 
 	return &HelixRunnerAPIServer{

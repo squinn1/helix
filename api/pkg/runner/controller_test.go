@@ -33,6 +33,12 @@ func (m *mockRuntimeFactory) NewSlot(ctx context.Context,
 	return m.getRuntimeFunc(), nil
 }
 
+func (m *mockRuntimeFactory) CreateSlot(ctx context.Context,
+	slotRequest *types.CreateRunnerSlotRequest,
+) (*Slot, error) {
+	panic("not implemented")
+}
+
 func TestController_GetSlots(t *testing.T) {
 	// Create a httptest server to test the getSlots method
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
