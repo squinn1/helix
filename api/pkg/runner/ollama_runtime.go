@@ -218,8 +218,6 @@ func startOllamaCmd(ctx context.Context, commander Commander, port int, cacheDir
 
 			return
 		}
-
-		log.Info().Msg("Ollama runtime stopped")
 	}()
 
 	return cmd, nil

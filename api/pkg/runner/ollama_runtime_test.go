@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/http"
 	"os/exec"
+	"syscall"
 	"testing"
 	"time"
 
@@ -14,6 +15,39 @@ import (
 	"github.com/stretchr/testify/require"
 	gomock "go.uber.org/mock/gomock"
 )
+
+func setupMockCommander(t *testing.T, ctrl *gomock.Controller, port int, cmdFn func(context.Context, string, ...string) *exec.Cmd) {
+	mockCommander := NewMockCommander(ctrl)
+
+	// Mock LookPath to return a fake ollama path
+	mockCommander.EXPECT().
+		LookPath("ollama").
+		Return("/usr/local/bin/ollama", nil)
+
+	// Mock CommandContext with the provided command function or use default
+	if cmdFn == nil {
+		cmdFn = func(ctx context.Context, name string, args ...string) *exec.Cmd {
+			cmd := exec.Command("echo", fmt.Sprintf("mock ollama server started on port %d", port))
+			// Need to start a dummy server to handle the health check
+			t.Logf("Starting dummy server on port %d", port)
+			go http.ListenAndServe(fmt.Sprintf("127.0.0.1:%d", port), http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(http.StatusOK)
+			}))
+			return cmd
+		}
+	}
+
+	mockCommander.EXPECT().
+		CommandContext(gomock.Any(), "/usr/local/bin/ollama", "serve").
+		DoAndReturn(cmdFn)
+
+	// Store the original commander and restore it after the test
+	originalCommander := ollamaCommander
+	ollamaCommander = mockCommander
+	t.Cleanup(func() {
+		ollamaCommander = originalCommander
+	})
+}
 
 func TestOllamaRuntime_Start(t *testing.T) {
 	ctrl := gomock.NewController(t)
@@ -43,32 +77,7 @@ func TestOllamaRuntime_Start(t *testing.T) {
 				port, err := freeport.GetFreePort()
 				require.Nil(t, err)
 
-				mockCommander := NewMockCommander(ctrl)
-
-				// Mock LookPath to return a fake ollama path
-				mockCommander.EXPECT().
-					LookPath("ollama").
-					Return("/usr/local/bin/ollama", nil)
-
-				// Mock CommandContext to return a command that will succeed
-				mockCommander.EXPECT().
-					CommandContext(gomock.Any(), "/usr/local/bin/ollama", "serve").
-					DoAndReturn(func(ctx context.Context, name string, args ...string) *exec.Cmd {
-						cmd := exec.Command("echo", fmt.Sprintf("mock ollama server started on port %d", port))
-						// Need to start a dummy server to handle the health check
-						t.Logf("Starting dummy server on port %d", port)
-						go http.ListenAndServe(fmt.Sprintf("127.0.0.1:%d", port), http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-							w.WriteHeader(http.StatusOK)
-						}))
-						return cmd
-					})
-
-				// Store the original commander and restore it after the test
-				originalCommander := ollamaCommander
-				ollamaCommander = mockCommander
-				t.Cleanup(func() {
-					ollamaCommander = originalCommander
-				})
+				setupMockCommander(t, ctrl, port, nil)
 
 				runtime, err := NewOllamaRuntime(context.Background(), OllamaRuntimeParams{
 					Port: &port,
@@ -91,32 +100,20 @@ func TestOllamaRuntime_Start(t *testing.T) {
 		{
 			name: "context timeout",
 			setup: func(t *testing.T) (*ollamaRuntime, context.Context) {
-				mockCommander := NewMockCommander(ctrl)
+				port, err := freeport.GetFreePort()
+				require.NoError(t, err)
 
-				// Mock LookPath
-				mockCommander.EXPECT().
-					LookPath("ollama").
-					Return("/usr/local/bin/ollama", nil)
-
-				// Mock CommandContext
-				mockCommander.EXPECT().
-					CommandContext(gomock.Any(), "/usr/local/bin/ollama", "serve").
-					DoAndReturn(func(ctx context.Context, name string, args ...string) *exec.Cmd {
-						return exec.Command("sleep", "10") // Command that will be interrupted
-					})
-
-				// Store and restore original commander
-				originalCommander := ollamaCommander
-				ollamaCommander = mockCommander
-				t.Cleanup(func() {
-					ollamaCommander = originalCommander
+				setupMockCommander(t, ctrl, port, func(ctx context.Context, name string, args ...string) *exec.Cmd {
+					return exec.Command("sleep", "10") // Command that will be interrupted
 				})
 
 				ctx, cancel := context.WithTimeout(context.Background(), 1*time.Millisecond)
 				defer cancel()
 				time.Sleep(2 * time.Millisecond) // Ensure timeout
 
-				runtime, err := NewOllamaRuntime(ctx, OllamaRuntimeParams{})
+				runtime, err := NewOllamaRuntime(ctx, OllamaRuntimeParams{
+					Port: &port,
+				})
 				require.NoError(t, err)
 				return runtime, ctx
 			},
@@ -144,6 +141,34 @@ func TestOllamaRuntime_Start(t *testing.T) {
 			},
 			expectedError: "is already in use",
 		},
+		{
+			name: "stop with permission error",
+			setup: func(t *testing.T) (*ollamaRuntime, context.Context) {
+				port, err := freeport.GetFreePort()
+				require.NoError(t, err)
+
+				setupMockCommander(t, ctrl, port, func(ctx context.Context, name string, args ...string) *exec.Cmd {
+					cmd := exec.Command("sleep", "1")
+					cmd.SysProcAttr = &syscall.SysProcAttr{
+						Credential: &syscall.Credential{
+							Uid: 0, // Root user
+							Gid: 0,
+						},
+					}
+					go http.ListenAndServe(fmt.Sprintf("127.0.0.1:%d", port), http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+						w.WriteHeader(http.StatusOK)
+					}))
+					return cmd
+				})
+
+				runtime, err := NewOllamaRuntime(context.Background(), OllamaRuntimeParams{
+					Port: &port,
+				})
+				require.NoError(t, err)
+				return runtime, context.Background()
+			},
+			expectedError: "not permitted",
+		},
 	}
 
 	for _, tt := range tests {
@@ -165,37 +190,59 @@ func TestOllamaRuntime_Start(t *testing.T) {
 }
 
 func TestOllamaRuntime_Stop(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
 	tests := []struct {
 		name          string
 		setup         func(t *testing.T) *ollamaRuntime
 		expectedError string
+		checkCleanup  func(t *testing.T, runtime *ollamaRuntime)
 	}{
 		{
-			name: "successful stop",
+			name: "successful stop with real ollama",
 			setup: func(t *testing.T) *ollamaRuntime {
-				runtime := &ollamaRuntime{
-					cacheDir: t.TempDir(),
+				// Skip if ollama not installed
+				if _, err := exec.LookPath("ollama"); err != nil {
+					t.Skip("ollama not found in PATH, skipping test")
 				}
-				err := runtime.Start(context.Background())
+
+				runtime, err := NewOllamaRuntime(context.Background(), OllamaRuntimeParams{})
+				require.NoError(t, err)
+				err = runtime.Start(context.Background())
 				require.NoError(t, err)
 				return runtime
+			},
+			checkCleanup: func(t *testing.T, runtime *ollamaRuntime) {
+				// Verify port is released
+				conn, err := net.Dial("tcp", fmt.Sprintf("localhost:%d", runtime.port))
+				assert.Error(t, err, "port should be released")
+				if err == nil {
+					conn.Close()
+				}
 			},
 		},
 		{
 			name: "stop without start",
 			setup: func(t *testing.T) *ollamaRuntime {
-				return &ollamaRuntime{
-					cacheDir: t.TempDir(),
-				}
+				runtime, err := NewOllamaRuntime(context.Background(), OllamaRuntimeParams{})
+				require.NoError(t, err)
+				return runtime
 			},
 		},
 		{
 			name: "double stop",
 			setup: func(t *testing.T) *ollamaRuntime {
-				runtime := &ollamaRuntime{
-					cacheDir: t.TempDir(),
-				}
-				err := runtime.Start(context.Background())
+				port, err := freeport.GetFreePort()
+				require.Nil(t, err)
+
+				setupMockCommander(t, ctrl, port, nil)
+
+				runtime, err := NewOllamaRuntime(context.Background(), OllamaRuntimeParams{
+					Port: &port,
+				})
+				require.NoError(t, err)
+				err = runtime.Start(context.Background())
 				require.NoError(t, err)
 				err = runtime.Stop()
 				require.NoError(t, err)
@@ -215,20 +262,10 @@ func TestOllamaRuntime_Stop(t *testing.T) {
 			} else {
 				assert.NoError(t, err)
 			}
+
+			if tt.checkCleanup != nil {
+				tt.checkCleanup(t, runtime)
+			}
 		})
 	}
-}
-
-// Mock Commander for testing
-type mockCommander struct {
-	lookPathFunc       func(file string) (string, error)
-	commandContextFunc func(ctx context.Context, name string, args ...string) *exec.Cmd
-}
-
-func (m *mockCommander) LookPath(file string) (string, error) {
-	return m.lookPathFunc(file)
-}
-
-func (m *mockCommander) CommandContext(ctx context.Context, name string, args ...string) *exec.Cmd {
-	return m.commandContextFunc(ctx, name, args...)
 }
