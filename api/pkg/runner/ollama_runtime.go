@@ -168,6 +168,33 @@ func (i *ollamaRuntime) PullModel(ctx context.Context, modelName string, pullPro
 	return nil
 }
 
+func (i *ollamaRuntime) ListModels(ctx context.Context) ([]Model, error) {
+	if i.ollamaClient == nil {
+		return nil, fmt.Errorf("ollama client not initialized")
+	}
+	models, err := i.ollamaClient.List(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("error listing models: %w", err)
+	}
+
+	modelList := []Model{}
+	for _, model := range models.Models {
+		modelList = append(modelList, Model{
+			Name:              model.Model,
+			ModifiedAt:        model.ModifiedAt,
+			Size:              model.Size,
+			Digest:            model.Digest,
+			ParentModel:       model.Details.ParentModel,
+			Format:            model.Details.Format,
+			Family:            model.Details.Family,
+			Families:          model.Details.Families,
+			ParameterSize:     model.Details.ParameterSize,
+			QuantizationLevel: model.Details.QuantizationLevel,
+		})
+	}
+	return modelList, nil
+}
+
 func (i *ollamaRuntime) waitUntilOllamaIsReady(ctx context.Context, startTimeout time.Duration) error {
 	startCtx, cancel := context.WithTimeout(ctx, startTimeout)
 	defer cancel()

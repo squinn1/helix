@@ -366,3 +366,70 @@ func TestOllamaRuntime_PullModel(t *testing.T) {
 		})
 	}
 }
+
+func TestOllamaRuntime_ListModels(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	tests := []struct {
+		name          string
+		setup         func(t *testing.T) *ollamaRuntime
+		expectedError string
+	}{
+		{
+			name: "list models with real ollama",
+			setup: func(t *testing.T) *ollamaRuntime {
+				runtime, err := NewOllamaRuntime(context.Background(), OllamaRuntimeParams{})
+				require.NoError(t, err)
+				err = runtime.Start(context.Background())
+				require.NoError(t, err)
+				return runtime
+			},
+		},
+		{
+			name: "list models with uninitialized client",
+			setup: func(t *testing.T) *ollamaRuntime {
+				runtime, err := NewOllamaRuntime(context.Background(), OllamaRuntimeParams{})
+				require.NoError(t, err)
+				return runtime
+			},
+			expectedError: "ollama client not initialized",
+		},
+		{
+			name: "list models successfully",
+			setup: func(t *testing.T) *ollamaRuntime {
+				port, err := freeport.GetFreePort()
+				require.NoError(t, err)
+
+				setupMockCommander(t, ctrl, port, nil)
+
+				runtime, err := NewOllamaRuntime(context.Background(), OllamaRuntimeParams{
+					Port: &port,
+				})
+				require.NoError(t, err)
+				err = runtime.Start(context.Background())
+				require.NoError(t, err)
+				return runtime
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			runtime := tt.setup(t)
+			models, err := runtime.ListModels(context.Background())
+			t.Logf("models: %+v", models)
+
+			if tt.expectedError != "" {
+				assert.Error(t, err)
+				assert.Contains(t, err.Error(), tt.expectedError)
+				assert.Nil(t, models)
+			} else {
+				assert.NoError(t, err)
+				assert.NotNil(t, models)
+				err = runtime.Stop()
+				assert.NoError(t, err)
+			}
+		})
+	}
+}
