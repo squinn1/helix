@@ -16,7 +16,6 @@ import (
 	"github.com/helixml/helix/api/pkg/system"
 	"github.com/helixml/helix/api/pkg/types"
 	"github.com/inhies/go-bytesize"
-	"github.com/puzpuzpuz/xsync/v3"
 	"github.com/rs/zerolog/log"
 )
 
@@ -96,9 +95,8 @@ type Runner struct {
 	Ctx                   context.Context
 	Options               Options
 	httpClientOptions     system.ClientOptions
-	activeModelInstances  *xsync.MapOf[string, ModelInstance] // the map of model instances that we have loaded and are currently running
-	websocketEventChannel chan *types.WebsocketEvent          // how we write web sockets messages to the api server
-	slots                 map[uuid.UUID]*Slot                 // A map recording the slots running on this runner
+	websocketEventChannel chan *types.WebsocketEvent // how we write web sockets messages to the api server
+	slots                 map[uuid.UUID]*Slot        // A map recording the slots running on this runner
 	server                *HelixRunnerAPIServer
 	pubsub                pubsub.PubSub
 }
@@ -154,7 +152,6 @@ func NewRunner(
 			Host:  options.APIHost,
 			Token: options.APIToken,
 		},
-		activeModelInstances:  xsync.NewMapOf[string, ModelInstance](),
 		websocketEventChannel: make(chan *types.WebsocketEvent),
 		slots:                 make(map[uuid.UUID]*Slot),
 		server:                server,
@@ -470,18 +467,18 @@ func (r *Runner) getNextAPISession(_ context.Context, queryParams url.Values) (*
 	return session, nil
 }
 
-func (r *Runner) getUsedMemory() uint64 {
-	memoryUsed := uint64(0)
-	r.activeModelInstances.Range(func(_ string, modelInstance ModelInstance) bool {
-		memoryUsed += modelInstance.Model().GetMemoryRequirements(modelInstance.Filter().Mode)
-		return true
-	})
-	return memoryUsed
-}
+// func (r *Runner) getUsedMemory() uint64 {
+// 	memoryUsed := uint64(0)
+// 	r.activeModelInstances.Range(func(_ string, modelInstance ModelInstance) bool {
+// 		memoryUsed += modelInstance.Model().GetMemoryRequirements(modelInstance.Filter().Mode)
+// 		return true
+// 	})
+// 	return memoryUsed
+// }
 
-func (r *Runner) getFreeMemory() int64 {
-	return int64(r.Options.MemoryBytes) - int64(r.getUsedMemory())
-}
+// func (r *Runner) getFreeMemory() int64 {
+// 	return int64(r.Options.MemoryBytes) - int64(r.getUsedMemory())
+// }
 
 func (r *Runner) handleWorkerResponse(res *types.RunnerTaskResponse) error {
 	// Ignore warmup sessions

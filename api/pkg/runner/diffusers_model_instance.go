@@ -26,10 +26,6 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
-var (
-	_ ModelInstance = &DiffusersModelInstance{}
-)
-
 type DiffusersInferenceRequest struct {
 	Model  string `json:"model"`
 	Prompt string `json:"prompt"`

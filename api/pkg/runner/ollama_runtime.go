@@ -20,6 +20,10 @@ import (
 	openai "github.com/sashabaranov/go-openai"
 )
 
+var (
+	ollamaCommander Commander     = &RealCommander{}
+)
+
 type OllamaRuntime struct {
 	Runtime      types.Runtime
 	Version      string

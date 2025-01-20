@@ -16,6 +16,10 @@ import (
 )
 
 func (s *HelixRunnerAPIServer) createEmbedding(rw http.ResponseWriter, r *http.Request) {
+	if s.cfg == nil {
+		http.Error(rw, "runner server not initialized", http.StatusInternalServerError)
+		return
+	}
 	slot_id := mux.Vars(r)["slot_id"]
 	slot_uuid, err := uuid.Parse(slot_id)
 	if err != nil {

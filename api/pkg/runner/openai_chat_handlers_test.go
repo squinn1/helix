@@ -100,7 +100,7 @@ func TestCreateChatCompletion(t *testing.T) {
 					}
 					json.NewEncoder(w).Encode(response)
 				}))
-				server := &HelixRunnerAPIServer{slots: make(map[uuid.UUID]*Slot)}
+				server := &HelixRunnerAPIServer{cfg: &RunnerServerOptions{ID: "test-runner"}, slots: make(map[uuid.UUID]*Slot)}
 				server.slots[existingSlotID] = existingSlot
 				client, err := CreateOpenaiClient(context.Background(), ts.URL)
 				require.NoError(t, err)
@@ -135,7 +135,7 @@ func TestCreateChatCompletion(t *testing.T) {
 					w.WriteHeader(http.StatusOK)
 					w.(http.Flusher).Flush()
 				}))
-				server := &HelixRunnerAPIServer{slots: make(map[uuid.UUID]*Slot)}
+				server := &HelixRunnerAPIServer{cfg: &RunnerServerOptions{ID: "test-runner"}, slots: make(map[uuid.UUID]*Slot)}
 				server.slots[existingSlotID] = existingSlot
 				client, err := CreateOpenaiClient(context.Background(), ts.URL)
 				require.NoError(t, err)
@@ -231,7 +231,7 @@ func TestCreateChatCompletion_RequestBodyTooLarge(t *testing.T) {
 }
 
 func TestCreateChatCompletion_UninitializedClient(t *testing.T) {
-	server := &HelixRunnerAPIServer{slots: make(map[uuid.UUID]*Slot)}
+	server := &HelixRunnerAPIServer{cfg: &RunnerServerOptions{ID: "test-runner"}, slots: make(map[uuid.UUID]*Slot)}
 	slotID := uuid.New()
 	server.slots[slotID] = &Slot{
 		Model:   "test-model",
