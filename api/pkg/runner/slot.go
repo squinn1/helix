@@ -21,7 +21,8 @@ type SlotFactory interface {
 	) (*Slot, error)
 	CreateSlot(ctx context.Context,
 		slotRequest *types.CreateRunnerSlotRequest,
-	) (*Slot, error)
+	) (Runtime, error)
+	ListSlots(ctx context.Context) (map[uuid.UUID]Info, error)
 }
 
 // Slot is the crazy mirror equivalent of scheduler.Slot
@@ -96,23 +97,40 @@ func (r *Slot) ErrorWorkload(workload *scheduler.Workload, err error) {
 
 var _ SlotFactory = &runtimeFactory{}
 
-type runtimeFactory struct{}
+type runtimeFactory struct {
+	slots map[uuid.UUID]Runtime
+}
 
 func (f *runtimeFactory) CreateSlot(ctx context.Context,
 	slotRequest *types.CreateRunnerSlotRequest,
-) (*Slot, error) {
-	slot := &Slot{
-		ID: slotRequest.ID,
-	}
+) (Runtime, error) {
 	switch slotRequest.Attributes.Runtime {
 	case types.RuntimeOllama:
-		log.Info().Msg("TODO: creating ollama slot")
+		slot, err := NewOllamaRuntime(ctx, OllamaRuntimeParams{
+			// TODO(phil): add runner configuration options
+		})
+		if err != nil {
+			return nil, err
+		}
+		f.slots[slotRequest.ID] = slot
 		return slot, nil
 	case types.RuntimeDiffusers:
 		log.Info().Msg("TODO: creating diffusers slot")
-		return slot, nil
+		return nil, nil
 	}
 	return nil, fmt.Errorf("unknown runtime: %s", slotRequest.Attributes.Runtime)
+}
+
+func (f *runtimeFactory) ListSlots(ctx context.Context) (map[uuid.UUID]Info, error) {
+	result := make(map[uuid.UUID]Info)
+	for id, slot := range f.slots {
+		info, err := slot.Info(ctx)
+		if err != nil {
+			return nil, err
+		}
+		result[id] = *info
+	}
+	return result, nil
 }
 
 func (f *runtimeFactory) NewSlot(ctx context.Context,

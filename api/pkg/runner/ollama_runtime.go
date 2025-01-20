@@ -13,6 +13,7 @@ import (
 
 	"github.com/helixml/helix/api/pkg/freeport"
 	"github.com/helixml/helix/api/pkg/system"
+	"github.com/helixml/helix/api/pkg/types"
 	"github.com/ollama/ollama/api"
 	"github.com/rs/zerolog/log"
 	openai "github.com/sashabaranov/go-openai"
@@ -193,6 +194,17 @@ func (i *ollamaRuntime) ListModels(ctx context.Context) ([]Model, error) {
 		})
 	}
 	return modelList, nil
+}
+
+func (i *ollamaRuntime) Info(ctx context.Context) (*Info, error) {
+	version, err := i.ollamaClient.Version(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("error getting ollama info: %w", err)
+	}
+	return &Info{
+		Runtime: types.RuntimeOllama,
+		Version: version,
+	}, nil
 }
 
 func (i *ollamaRuntime) waitUntilOllamaIsReady(ctx context.Context, startTimeout time.Duration) error {

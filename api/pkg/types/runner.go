@@ -39,3 +39,15 @@ type CreateRunnerSlotRequest struct {
 	ID         uuid.UUID                  `json:"id"`
 	Attributes CreateRunnerSlotAttributes `json:"attributes"`
 }
+
+type RunnerSlot struct {
+	ID      uuid.UUID `json:"id"`
+	Runtime Runtime   `json:"runtime"`
+	Version string    `json:"version"`
+	// ...
+	// TODO(phil): add more fields
+}
+
+type ListRunnerSlotsResponse struct {
+	Slots []RunnerSlot `json:"slots"`
+}

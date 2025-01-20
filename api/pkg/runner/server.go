@@ -76,6 +76,12 @@ func (apiServer *HelixRunnerAPIServer) registerRoutes(_ context.Context) (*mux.R
 	subRouter.HandleFunc("/healthz", apiServer.healthz).Methods(http.MethodGet)
 	subRouter.HandleFunc("/status", apiServer.status).Methods(http.MethodGet)
 	subRouter.HandleFunc("/slots", apiServer.createSlot).Methods(http.MethodPost)
+	subRouter.HandleFunc("/slots", apiServer.listSlots).Methods(http.MethodGet)
+	// subRouter.HandleFunc("/slots/{slot_id}/chat/completions", apiServer.createChatCompletion).Methods(http.MethodPost, http.MethodOptions)
+
+	// OpenAI API compatible routes
+	// router.HandleFunc("/chat/completions", apiServer.createChatCompletion).Methods(http.MethodPost, http.MethodOptions)
+	// router.HandleFunc("/models", apiServer.authMiddleware.auth(apiServer.listModels)).Methods(http.MethodGet)
 
 	// register pprof routes
 	router.PathPrefix("/debug/pprof/").Handler(http.DefaultServeMux)
@@ -112,4 +118,26 @@ func (apiServer *HelixRunnerAPIServer) createSlot(w http.ResponseWriter, r *http
 
 	// TODO(Phil): Return some representation of the slot
 	w.WriteHeader(http.StatusCreated)
+}
+
+func (apiServer *HelixRunnerAPIServer) listSlots(w http.ResponseWriter, r *http.Request) {
+	slots, err := apiServer.cfg.SlotFactory.ListSlots(r.Context())
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	slotList := make([]types.RunnerSlot, 0, len(slots))
+	for id, slot := range slots {
+		slotList = append(slotList, types.RunnerSlot{
+			ID:      id,
+			Runtime: slot.Runtime,
+			Version: slot.Version,
+		})
+	}
+	response := &types.ListRunnerSlotsResponse{
+		Slots: slotList,
+	}
+	json.NewEncoder(w).Encode(response)
+	w.WriteHeader(http.StatusOK)
 }
