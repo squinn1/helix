@@ -7,17 +7,12 @@ import (
 	"fmt"
 	"io"
 	"net/url"
-	"runtime/debug"
 	"strings"
-	"time"
 
 	"github.com/google/uuid"
 	"github.com/hashicorp/go-retryablehttp"
 	"github.com/helixml/helix/api/pkg/config"
-	"github.com/helixml/helix/api/pkg/data"
 	"github.com/helixml/helix/api/pkg/pubsub"
-	"github.com/helixml/helix/api/pkg/scheduler"
-	"github.com/helixml/helix/api/pkg/server"
 	"github.com/helixml/helix/api/pkg/system"
 	"github.com/helixml/helix/api/pkg/types"
 	"github.com/inhies/go-bytesize"
@@ -89,8 +84,6 @@ type Options struct {
 	// never run more than this number of model instances
 	MaxModelInstances int
 
-	RuntimeFactory SlotFactory
-
 	WebServer WebServer
 }
 
@@ -106,7 +99,6 @@ type Runner struct {
 	activeModelInstances  *xsync.MapOf[string, ModelInstance] // the map of model instances that we have loaded and are currently running
 	websocketEventChannel chan *types.WebsocketEvent          // how we write web sockets messages to the api server
 	slots                 map[uuid.UUID]*Slot                 // A map recording the slots running on this runner
-	slotFactory           SlotFactory                         // A factory to create new slots. Required for testing since we don't actually want to spin up ollama on each test
 	server                *HelixRunnerAPIServer
 	pubsub                pubsub.PubSub
 }
@@ -125,9 +117,6 @@ func NewRunner(
 	if options.APIToken == "" {
 		return nil, fmt.Errorf("api token is required")
 	}
-	if options.RuntimeFactory == nil {
-		options.RuntimeFactory = &runtimeFactory{}
-	}
 
 	// Remove trailing slash from ApiHost if present
 	options.APIHost = strings.TrimSuffix(options.APIHost, "/")
@@ -145,8 +134,9 @@ func NewRunner(
 	}
 
 	server, err := NewHelixRunnerAPIServer(&RunnerServerOptions{
-		Host: options.WebServer.Host,
-		Port: options.WebServer.Port,
+		Host:       options.WebServer.Host,
+		Port:       options.WebServer.Port,
+		CLIContext: ctx,
 	})
 	if err != nil {
 		return nil, err
@@ -167,49 +157,45 @@ func NewRunner(
 		activeModelInstances:  xsync.NewMapOf[string, ModelInstance](),
 		websocketEventChannel: make(chan *types.WebsocketEvent),
 		slots:                 make(map[uuid.UUID]*Slot),
-		slotFactory:           options.RuntimeFactory,
 		server:                server,
 		pubsub:                ps,
 	}
 	return runner, nil
 }
 
-func (r *Runner) Initialize(ctx context.Context) error {
-	// connect to the runner websocket server on the api
-	// when we write events down the channel - write them to the websocket
-	parsedURL, err := url.Parse(system.WSURL(r.httpClientOptions, system.GetAPIPath("/ws/runner")))
-	if err != nil {
-		return err
-	}
+// func (r *Runner) Initialize(ctx context.Context) error {
+// 	// connect to the runner websocket server on the api
+// 	// when we write events down the channel - write them to the websocket
+// 	parsedURL, err := url.Parse(system.WSURL(r.httpClientOptions, system.GetAPIPath("/ws/runner")))
+// 	if err != nil {
+// 		return err
+// 	}
 
-	fmt.Println("Connecting to controlplane", system.WSURL(r.httpClientOptions, system.GetAPIPath("/ws/runner")))
+// 	fmt.Println("Connecting to controlplane", system.WSURL(r.httpClientOptions, system.GetAPIPath("/ws/runner")))
 
-	queryParams := url.Values{}
-	queryParams.Add("runnerid", r.Options.ID)
-	queryParams.Add("access_token", r.Options.APIToken)
-	parsedURL.RawQuery = queryParams.Encode()
+// 	queryParams := url.Values{}
+// 	queryParams.Add("runnerid", r.Options.ID)
+// 	queryParams.Add("access_token", r.Options.APIToken)
+// 	parsedURL.RawQuery = queryParams.Encode()
 
-	go server.ConnectRunnerWebSocketClient(
-		ctx,
-		parsedURL.String(),
-		r.websocketEventChannel,
-	)
+// 	go server.ConnectRunnerWebSocketClient(
+// 		ctx,
+// 		parsedURL.String(),
+// 		r.websocketEventChannel,
+// 	)
 
-	return nil
-}
+// 	return nil
+// }
 
 // this should be run in a go-routine
 func (r *Runner) Run(ctx context.Context) {
-	err := r.warmupInference(context.Background())
-	if err != nil {
-		log.Error().Msgf("error in warmup inference: %s", err.Error())
-		debug.PrintStack()
-	} else {
-		log.Info().Msg("🟢 warmup inference complete")
-	}
-
-	go r.startTaskLoop()
-	go r.startReportStateLoop()
+	// err := r.warmupInference(context.Background())
+	// if err != nil {
+	// 	log.Error().Msgf("error in warmup inference: %s", err.Error())
+	// 	debug.PrintStack()
+	// } else {
+	// 	log.Info().Msg("🟢 warmup inference complete")
+	// }
 
 	log.Info().Msgf("Starting runner server on %s:%d", r.Options.WebServer.Host, r.Options.WebServer.Port)
 	go func() {
@@ -235,127 +221,127 @@ func (r *Runner) Run(ctx context.Context) {
 
 }
 
-func (r *Runner) startTaskLoop() {
-	for {
-		select {
-		case <-r.Ctx.Done():
-			return
-		case <-time.After(time.Millisecond * time.Duration(r.Options.GetTaskDelayMilliseconds)):
-			err := r.pollSlots(r.Ctx)
-			if err != nil {
-				log.Err(err).Msg("error in pollSlots")
-				debug.PrintStack()
-			}
-		}
-	}
-}
+// func (r *Runner) startTaskLoop() {
+// 	for {
+// 		select {
+// 		case <-r.Ctx.Done():
+// 			return
+// 		case <-time.After(time.Millisecond * time.Duration(r.Options.GetTaskDelayMilliseconds)):
+// 			err := r.pollSlots(r.Ctx)
+// 			if err != nil {
+// 				log.Err(err).Msg("error in pollSlots")
+// 				debug.PrintStack()
+// 			}
+// 		}
+// 	}
+// }
 
-func (r *Runner) pollSlots(_ context.Context) error {
-	// TODO(PHIL): The old warmup code was sketchy. It had two paths (V1/V2 thing). And mostly just
-	// called the old llama:instruct model. Ideally the warmup should be orchestrated from the
-	// control plane anyway. So I'm just removing it for now.
+// func (r *Runner) pollSlots(_ context.Context) error {
+// 	// TODO(PHIL): The old warmup code was sketchy. It had two paths (V1/V2 thing). And mostly just
+// 	// called the old llama:instruct model. Ideally the warmup should be orchestrated from the
+// 	// control plane anyway. So I'm just removing it for now.
 
-	desiredSlots, err := r.getSlots()
-	if err != nil {
-		return err
-	}
+// 	desiredSlots, err := r.getSlots()
+// 	if err != nil {
+// 		return err
+// 	}
 
-	l := log.With().
-		Str("runner_id", r.Options.ID).
-		Interface("r.slots", r.slots).
-		Interface("desiredSlots", desiredSlots).
-		Logger()
+// 	l := log.With().
+// 		Str("runner_id", r.Options.ID).
+// 		Interface("r.slots", r.slots).
+// 		Interface("desiredSlots", desiredSlots).
+// 		Logger()
 
-	l.Trace().Msg("pollSlots")
+// 	l.Trace().Msg("pollSlots")
 
-	// First stop and delete any runtimes that are no longer needed
-	for slotID, runtime := range r.slots {
-		found := false
-		for _, slot := range desiredSlots.Data {
-			if slot.ID == slotID {
-				found = true
-				break
-			}
-		}
-		if !found {
-			l.Trace().Str("slot_id", slotID.String()).Msg("deleting slot")
-			runtime.Stop()
+// 	// First stop and delete any runtimes that are no longer needed
+// 	for slotID, runtime := range r.slots {
+// 		found := false
+// 		for _, slot := range desiredSlots.Data {
+// 			if slot.ID == slotID {
+// 				found = true
+// 				break
+// 			}
+// 		}
+// 		if !found {
+// 			l.Trace().Str("slot_id", slotID.String()).Msg("deleting slot")
+// 			runtime.Stop()
 
-			// TODO(PHIL): Remove this only required by axolotl
-			if runtime.modelInstance != nil {
-				r.activeModelInstances.Delete(runtime.modelInstance.ID())
-			}
+// 			// TODO(PHIL): Remove this only required by axolotl
+// 			if runtime.modelInstance != nil {
+// 				r.activeModelInstances.Delete(runtime.modelInstance.ID())
+// 			}
 
-			delete(r.slots, slotID)
-		}
-	}
+// 			delete(r.slots, slotID)
+// 		}
+// 	}
 
-	for _, slot := range desiredSlots.Data {
-		// If there's no work, then we don't need to do anything for now
-		if slot.Attributes.Workload == nil {
-			continue
-		}
+// 	for _, slot := range desiredSlots.Data {
+// 		// If there's no work, then we don't need to do anything for now
+// 		if slot.Attributes.Workload == nil {
+// 			continue
+// 		}
 
-		l.Debug().Str("slot_id", slot.ID.String()).Msg("slot has workload")
+// 		l.Debug().Str("slot_id", slot.ID.String()).Msg("slot has workload")
 
-		// If there is work, then parse the RunnerWorkload into a Workload
-		var work *scheduler.Workload
-		if slot.Attributes.Workload.LLMInferenceRequest != nil {
-			work, err = scheduler.NewLLMWorkload(slot.Attributes.Workload.LLMInferenceRequest)
-			if err != nil {
-				return err
-			}
-		}
-		if slot.Attributes.Workload.Session != nil {
-			work, err = scheduler.NewSessionWorkload(slot.Attributes.Workload.Session)
-			if err != nil {
-				return err
-			}
-		}
-		if work == nil {
-			return fmt.Errorf("unable to parse workload")
-		}
+// 		// If there is work, then parse the RunnerWorkload into a Workload
+// 		var work *scheduler.Workload
+// 		if slot.Attributes.Workload.LLMInferenceRequest != nil {
+// 			work, err = scheduler.NewLLMWorkload(slot.Attributes.Workload.LLMInferenceRequest)
+// 			if err != nil {
+// 				return err
+// 			}
+// 		}
+// 		if slot.Attributes.Workload.Session != nil {
+// 			work, err = scheduler.NewSessionWorkload(slot.Attributes.Workload.Session)
+// 			if err != nil {
+// 				return err
+// 			}
+// 		}
+// 		if work == nil {
+// 			return fmt.Errorf("unable to parse workload")
+// 		}
 
-		// Get the current runtime for the slot
-		runtime, ok := r.slots[slot.ID]
+// 		// Get the current runtime for the slot
+// 		runtime, ok := r.slots[slot.ID]
 
-		// If it doesn't exist, start a new runtime and save
-		if !ok {
-			l.Debug().Str("slot_id", slot.ID.String()).Msg("starting new runtime")
-			runtime, err = r.startNewRuntime(slot.ID, work)
-			if err != nil {
-				return err
-			}
-			// TODO: Could do with storing this BEFORE it has started, because it takes time to start.
-			r.slots[slot.ID] = runtime
-			continue
-		}
+// 		// If it doesn't exist, start a new runtime and save
+// 		if !ok {
+// 			l.Debug().Str("slot_id", slot.ID.String()).Msg("starting new runtime")
+// 			runtime, err = r.startNewRuntime(slot.ID, work)
+// 			if err != nil {
+// 				return err
+// 			}
+// 			// TODO: Could do with storing this BEFORE it has started, because it takes time to start.
+// 			r.slots[slot.ID] = runtime
+// 			continue
+// 		}
 
-		// If the runtime already has work scheduled, then we don't need to do anything
-		if runtime.IsScheduled() {
-			l.Trace().Str("slot_id", slot.ID.String()).Msg("runtime already scheduled")
-			continue
-		}
+// 		// If the runtime already has work scheduled, then we don't need to do anything
+// 		if runtime.IsScheduled() {
+// 			l.Trace().Str("slot_id", slot.ID.String()).Msg("runtime already scheduled")
+// 			continue
+// 		}
 
-		// If the runtime is already running a workload, then we don't need to do anything
-		if runtime.modelInstance.IsActive() {
-			l.Trace().Str("slot_id", slot.ID.String()).Msg("runtime already active")
-			continue
-		}
+// 		// If the runtime is already running a workload, then we don't need to do anything
+// 		if runtime.modelInstance.IsActive() {
+// 			l.Trace().Str("slot_id", slot.ID.String()).Msg("runtime already active")
+// 			continue
+// 		}
 
-		// If we get here then that means the slot already has a runtime and is waiting for work
-		switch work.WorkloadType {
-		case scheduler.WorkloadTypeLLMInferenceRequest:
-			log.Debug().Str("workload_id", work.ID()).Msg("enqueuing LLM inference request")
-			runtime.SetLLMInferenceRequest(work)
-		case scheduler.WorkloadTypeSession:
-			log.Debug().Str("workload_id", work.ID()).Msg("enqueuing session request")
-			runtime.SetSessionRequest(work)
-		}
-	}
+// 		// If we get here then that means the slot already has a runtime and is waiting for work
+// 		switch work.WorkloadType {
+// 		case scheduler.WorkloadTypeLLMInferenceRequest:
+// 			log.Debug().Str("workload_id", work.ID()).Msg("enqueuing LLM inference request")
+// 			runtime.SetLLMInferenceRequest(work)
+// 		case scheduler.WorkloadTypeSession:
+// 			log.Debug().Str("workload_id", work.ID()).Msg("enqueuing session request")
+// 			runtime.SetSessionRequest(work)
+// 		}
+// 	}
 
-	return nil
-}
+// 	return nil
+// }
 
 func (r *Runner) getSlots() (*types.GetDesiredRunnerSlotsResponse, error) {
 	parsedURL, err := url.Parse(system.URL(r.httpClientOptions, system.GetAPIPath(fmt.Sprintf("/runner/%s/slots", r.Options.ID))))
@@ -400,37 +386,37 @@ func (r *Runner) getSlots() (*types.GetDesiredRunnerSlotsResponse, error) {
 	return slots, nil
 }
 
-func (r *Runner) startReportStateLoop() {
-	for {
-		select {
-		case <-r.Ctx.Done():
-			return
-		case <-time.After(time.Second * time.Duration(r.Options.ReportStateDelaySeconds)):
-			err := r.reportStateLoop(r.Ctx)
-			if err != nil {
-				log.Error().Msgf("error in report state loop: %s", err.Error())
-				debug.PrintStack()
-			}
-		}
-	}
-}
+// func (r *Runner) startReportStateLoop() {
+// 	for {
+// 		select {
+// 		case <-r.Ctx.Done():
+// 			return
+// 		case <-time.After(time.Second * time.Duration(r.Options.ReportStateDelaySeconds)):
+// 			err := r.reportStateLoop(r.Ctx)
+// 			if err != nil {
+// 				log.Error().Msgf("error in report state loop: %s", err.Error())
+// 				debug.PrintStack()
+// 			}
+// 		}
+// 	}
+// }
 
-func (r *Runner) reportStateLoop(_ context.Context) error {
-	state, err := r.getState()
-	if err != nil {
-		return err
-	}
-	log.Trace().Msgf("🟠 Sending runner state %s %+v", r.Options.ID, state)
-	_, err = system.PostRequest[*types.RunnerState, *types.RunnerState](
-		r.httpClientOptions,
-		system.GetAPIPath(fmt.Sprintf("/runner/%s/state", r.Options.ID)),
-		state,
-	)
-	if err != nil {
-		return err
-	}
-	return nil
-}
+// func (r *Runner) reportStateLoop(_ context.Context) error {
+// 	state, err := r.getState()
+// 	if err != nil {
+// 		return err
+// 	}
+// 	log.Trace().Msgf("🟠 Sending runner state %s %+v", r.Options.ID, state)
+// 	_, err = system.PostRequest[*types.RunnerState, *types.RunnerState](
+// 		r.httpClientOptions,
+// 		system.GetAPIPath(fmt.Sprintf("/runner/%s/state", r.Options.ID)),
+// 		state,
+// 	)
+// 	if err != nil {
+// 		return err
+// 	}
+// 	return nil
+// }
 
 func GiB(bytes int64) float32 {
 	return float32(bytes) / 1024 / 1024 / 1024
@@ -558,57 +544,57 @@ func (r *Runner) postWorkerResponseToAPI(res *types.RunnerTaskResponse) error {
 	return nil
 }
 
-func (r *Runner) getState() (*types.RunnerState, error) {
-	modelInstances := []*types.ModelInstanceState{}
-	r.activeModelInstances.Range(func(_ string, modelInstance ModelInstance) bool {
-		state, err := modelInstance.GetState()
-		if err != nil {
-			log.Error().Msgf("error getting state for model instance %s (%s): %s", modelInstance.ID(), modelInstance.Filter().ModelName, err.Error())
-			return false
-		}
-		modelInstances = append(modelInstances, state)
-		return true
-	})
-	if len(modelInstances) != r.activeModelInstances.Size() {
-		return nil, fmt.Errorf("error getting state, incorrect model instance count")
-	}
-	return &types.RunnerState{
-		ID:                  r.Options.ID,
-		Created:             time.Now(),
-		TotalMemory:         r.Options.MemoryBytes,
-		FreeMemory:          r.getFreeMemory(),
-		Labels:              r.Options.Labels,
-		ModelInstances:      modelInstances,
-		SchedulingDecisions: []string{"[Deprecated] Runners no longer make scheduling decisions. This will be removed shortly"},
-		Version:             data.GetHelixVersion(),
-		Slots:               r.getRunnerSlots(),
-	}, nil
-}
+// func (r *Runner) getState() (*types.RunnerState, error) {
+// 	modelInstances := []*types.ModelInstanceState{}
+// 	r.activeModelInstances.Range(func(_ string, modelInstance ModelInstance) bool {
+// 		state, err := modelInstance.GetState()
+// 		if err != nil {
+// 			log.Error().Msgf("error getting state for model instance %s (%s): %s", modelInstance.ID(), modelInstance.Filter().ModelName, err.Error())
+// 			return false
+// 		}
+// 		modelInstances = append(modelInstances, state)
+// 		return true
+// 	})
+// 	if len(modelInstances) != r.activeModelInstances.Size() {
+// 		return nil, fmt.Errorf("error getting state, incorrect model instance count")
+// 	}
+// 	return &types.RunnerState{
+// 		ID:                  r.Options.ID,
+// 		Created:             time.Now(),
+// 		TotalMemory:         r.Options.MemoryBytes,
+// 		FreeMemory:          r.getFreeMemory(),
+// 		Labels:              r.Options.Labels,
+// 		ModelInstances:      modelInstances,
+// 		SchedulingDecisions: []string{"[Deprecated] Runners no longer make scheduling decisions. This will be removed shortly"},
+// 		Version:             data.GetHelixVersion(),
+// 		Slots:               r.getRunnerSlots(),
+// 	}, nil
+// }
 
-func (r *Runner) getRunnerSlots() []types.RunnerActualSlot {
-	slots := []types.RunnerActualSlot{}
-	for slotID, runtime := range r.slots {
-		slots = append(slots, types.RunnerActualSlot{
-			ID: slotID,
-			Attributes: types.RunnerActualSlotAttributes{
-				OriginalWorkload: runtime.OriginalWorkload(),
-				CurrentWorkload:  runtime.CurrentWorkload(),
-			},
-		})
-	}
-	return slots
-}
+// func (r *Runner) getRunnerSlots() []types.RunnerActualSlot {
+// 	slots := []types.RunnerActualSlot{}
+// 	for slotID, runtime := range r.slots {
+// 		slots = append(slots, types.RunnerActualSlot{
+// 			ID: slotID,
+// 			Attributes: types.RunnerActualSlotAttributes{
+// 				OriginalWorkload: runtime.OriginalWorkload(),
+// 				CurrentWorkload:  runtime.CurrentWorkload(),
+// 			},
+// 		})
+// 	}
+// 	return slots
+// }
 
-func (r *Runner) startNewRuntime(slotID uuid.UUID, work *scheduler.Workload) (*Slot, error) {
-	runtime, err := r.slotFactory.NewSlot(r.Ctx, slotID, work, r.handleInferenceResponse, r.handleWorkerResponse, r.Options)
-	if err != nil {
-		return nil, err
-	}
+// func (r *Runner) startNewRuntime(slotID uuid.UUID, work *scheduler.Workload) (*Slot, error) {
+// 	runtime, err := r.slotFactory.NewSlot(r.Ctx, slotID, work, r.handleInferenceResponse, r.handleWorkerResponse, r.Options)
+// 	if err != nil {
+// 		return nil, err
+// 	}
 
-	// TODO(PHIL): Remove this. Required for use in the axolotl runner and dashboard data for now.
-	r.activeModelInstances.Store(runtime.modelInstance.ID(), runtime.modelInstance)
-	return runtime, nil
-}
+// 	// TODO(PHIL): Remove this. Required for use in the axolotl runner and dashboard data for now.
+// 	r.activeModelInstances.Store(runtime.modelInstance.ID(), runtime.modelInstance)
+// 	return runtime, nil
+// }
 
 func ErrorSession(sessionResponseHandler func(res *types.RunnerTaskResponse) error, session *types.Session, err error) error {
 	return sessionResponseHandler(&types.RunnerTaskResponse{

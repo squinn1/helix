@@ -302,10 +302,10 @@ func runnerCLI(cmd *cobra.Command, options *RunnerOptions) error {
 		return err
 	}
 
-	err = runnerController.Initialize(ctx)
-	if err != nil {
-		return err
-	}
+	// err = runnerController.Initialize(ctx)
+	// if err != nil {
+	// 	return err
+	// }
 
 	go runnerController.Run(ctx)
 

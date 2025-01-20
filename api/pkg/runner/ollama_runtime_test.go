@@ -55,12 +55,12 @@ func TestOllamaRuntime_Start(t *testing.T) {
 
 	tests := []struct {
 		name          string
-		setup         func(t *testing.T) (*ollamaRuntime, context.Context)
+		setup         func(t *testing.T) (*OllamaRuntime, context.Context)
 		expectedError string
 	}{
 		{
 			name: "successful start with real ollama",
-			setup: func(t *testing.T) (*ollamaRuntime, context.Context) {
+			setup: func(t *testing.T) (*OllamaRuntime, context.Context) {
 				// Skip test if ollama is not installed
 				if _, err := exec.LookPath("ollama"); err != nil {
 					t.Skip("ollama not found in PATH, skipping test")
@@ -73,7 +73,7 @@ func TestOllamaRuntime_Start(t *testing.T) {
 		},
 		{
 			name: "successful start mocked",
-			setup: func(t *testing.T) (*ollamaRuntime, context.Context) {
+			setup: func(t *testing.T) (*OllamaRuntime, context.Context) {
 				port, err := freeport.GetFreePort()
 				require.Nil(t, err)
 
@@ -88,7 +88,7 @@ func TestOllamaRuntime_Start(t *testing.T) {
 		},
 		{
 			name: "context cancelled",
-			setup: func(t *testing.T) (*ollamaRuntime, context.Context) {
+			setup: func(t *testing.T) (*OllamaRuntime, context.Context) {
 				ctx, cancel := context.WithCancel(context.Background())
 				cancel() // Cancel immediately
 				runtime, err := NewOllamaRuntime(ctx, OllamaRuntimeParams{})
@@ -99,7 +99,7 @@ func TestOllamaRuntime_Start(t *testing.T) {
 		},
 		{
 			name: "context timeout",
-			setup: func(t *testing.T) (*ollamaRuntime, context.Context) {
+			setup: func(t *testing.T) (*OllamaRuntime, context.Context) {
 				port, err := freeport.GetFreePort()
 				require.NoError(t, err)
 
@@ -121,7 +121,7 @@ func TestOllamaRuntime_Start(t *testing.T) {
 		},
 		{
 			name: "port already in use",
-			setup: func(t *testing.T) (*ollamaRuntime, context.Context) {
+			setup: func(t *testing.T) (*OllamaRuntime, context.Context) {
 				// Create a listener to occupy a port
 				listener, err := net.Listen("tcp", "127.0.0.1:0")
 				require.NoError(t, err)
@@ -143,7 +143,7 @@ func TestOllamaRuntime_Start(t *testing.T) {
 		},
 		{
 			name: "stop with permission error",
-			setup: func(t *testing.T) (*ollamaRuntime, context.Context) {
+			setup: func(t *testing.T) (*OllamaRuntime, context.Context) {
 				port, err := freeport.GetFreePort()
 				require.NoError(t, err)
 
@@ -195,13 +195,13 @@ func TestOllamaRuntime_Stop(t *testing.T) {
 
 	tests := []struct {
 		name          string
-		setup         func(t *testing.T) *ollamaRuntime
+		setup         func(t *testing.T) *OllamaRuntime
 		expectedError string
-		checkCleanup  func(t *testing.T, runtime *ollamaRuntime)
+		checkCleanup  func(t *testing.T, runtime *OllamaRuntime)
 	}{
 		{
 			name: "successful stop with real ollama",
-			setup: func(t *testing.T) *ollamaRuntime {
+			setup: func(t *testing.T) *OllamaRuntime {
 				// Skip if ollama not installed
 				if _, err := exec.LookPath("ollama"); err != nil {
 					t.Skip("ollama not found in PATH, skipping test")
@@ -213,7 +213,7 @@ func TestOllamaRuntime_Stop(t *testing.T) {
 				require.NoError(t, err)
 				return runtime
 			},
-			checkCleanup: func(t *testing.T, runtime *ollamaRuntime) {
+			checkCleanup: func(t *testing.T, runtime *OllamaRuntime) {
 				// Verify port is released
 				conn, err := net.Dial("tcp", fmt.Sprintf("localhost:%d", runtime.port))
 				assert.Error(t, err, "port should be released")
@@ -224,7 +224,7 @@ func TestOllamaRuntime_Stop(t *testing.T) {
 		},
 		{
 			name: "stop without start",
-			setup: func(t *testing.T) *ollamaRuntime {
+			setup: func(t *testing.T) *OllamaRuntime {
 				runtime, err := NewOllamaRuntime(context.Background(), OllamaRuntimeParams{})
 				require.NoError(t, err)
 				return runtime
@@ -232,7 +232,7 @@ func TestOllamaRuntime_Stop(t *testing.T) {
 		},
 		{
 			name: "double stop",
-			setup: func(t *testing.T) *ollamaRuntime {
+			setup: func(t *testing.T) *OllamaRuntime {
 				port, err := freeport.GetFreePort()
 				require.Nil(t, err)
 
@@ -276,13 +276,13 @@ func TestOllamaRuntime_PullModel(t *testing.T) {
 
 	tests := []struct {
 		name          string
-		setup         func(t *testing.T) *ollamaRuntime
+		setup         func(t *testing.T) *OllamaRuntime
 		modelName     string
 		expectedError string
 	}{
 		{
 			name: "pull model with real ollama",
-			setup: func(t *testing.T) *ollamaRuntime {
+			setup: func(t *testing.T) *OllamaRuntime {
 				// Skip test if ollama is not installed
 				if _, err := exec.LookPath("ollama"); err != nil {
 					t.Skip("ollama not found in PATH, skipping test")
@@ -299,7 +299,7 @@ func TestOllamaRuntime_PullModel(t *testing.T) {
 		},
 		{
 			name: "pull model with mocked ollama",
-			setup: func(t *testing.T) *ollamaRuntime {
+			setup: func(t *testing.T) *OllamaRuntime {
 				port, err := freeport.GetFreePort()
 				require.NoError(t, err)
 
@@ -318,7 +318,7 @@ func TestOllamaRuntime_PullModel(t *testing.T) {
 		},
 		{
 			name: "pull without starting runtime",
-			setup: func(t *testing.T) *ollamaRuntime {
+			setup: func(t *testing.T) *OllamaRuntime {
 				runtime, err := NewOllamaRuntime(context.Background(), OllamaRuntimeParams{})
 				require.NoError(t, err)
 				return runtime
@@ -328,7 +328,7 @@ func TestOllamaRuntime_PullModel(t *testing.T) {
 		},
 		{
 			name: "pull with invalid model name",
-			setup: func(t *testing.T) *ollamaRuntime {
+			setup: func(t *testing.T) *OllamaRuntime {
 				port, err := freeport.GetFreePort()
 				require.NoError(t, err)
 
@@ -373,12 +373,12 @@ func TestOllamaRuntime_ListModels(t *testing.T) {
 
 	tests := []struct {
 		name          string
-		setup         func(t *testing.T) *ollamaRuntime
+		setup         func(t *testing.T) *OllamaRuntime
 		expectedError string
 	}{
 		{
 			name: "list models with real ollama",
-			setup: func(t *testing.T) *ollamaRuntime {
+			setup: func(t *testing.T) *OllamaRuntime {
 				runtime, err := NewOllamaRuntime(context.Background(), OllamaRuntimeParams{})
 				require.NoError(t, err)
 				err = runtime.Start(context.Background())
@@ -388,7 +388,7 @@ func TestOllamaRuntime_ListModels(t *testing.T) {
 		},
 		{
 			name: "list models with uninitialized client",
-			setup: func(t *testing.T) *ollamaRuntime {
+			setup: func(t *testing.T) *OllamaRuntime {
 				runtime, err := NewOllamaRuntime(context.Background(), OllamaRuntimeParams{})
 				require.NoError(t, err)
 				return runtime
@@ -397,7 +397,7 @@ func TestOllamaRuntime_ListModels(t *testing.T) {
 		},
 		{
 			name: "list models successfully",
-			setup: func(t *testing.T) *ollamaRuntime {
+			setup: func(t *testing.T) *OllamaRuntime {
 				port, err := freeport.GetFreePort()
 				require.NoError(t, err)
 

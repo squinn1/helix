@@ -33,6 +33,7 @@ const (
 
 type CreateRunnerSlotAttributes struct {
 	Runtime Runtime `json:"runtime"`
+	Model   string  `json:"model"`
 }
 
 type CreateRunnerSlotRequest struct {
@@ -43,6 +44,7 @@ type CreateRunnerSlotRequest struct {
 type RunnerSlot struct {
 	ID      uuid.UUID `json:"id"`
 	Runtime Runtime   `json:"runtime"`
+	Model   string    `json:"model"`
 	Version string    `json:"version"`
 	// ...
 	// TODO(phil): add more fields

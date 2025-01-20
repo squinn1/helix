@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"strings"
 	"time"
 
 	"github.com/helixml/helix/api/pkg/freeport"
@@ -19,16 +20,35 @@ import (
 	openai "github.com/sashabaranov/go-openai"
 )
 
-var _ Runtime = &ollamaRuntime{}
-
-type ollamaRuntime struct {
-	openaiClient *openai.Client
-	ollamaClient *api.Client
+type OllamaRuntime struct {
+	Runtime      types.Runtime
+	Version      string
+	OpenAIClient *openai.Client
 	cacheDir     string
-	cmd          *exec.Cmd
-	cancel       context.CancelFunc
 	port         int
 	startTimeout time.Duration
+	ollamaClient *api.Client
+	cmd          *exec.Cmd
+	cancel       context.CancelFunc
+}
+
+type PullProgress struct {
+	Status    string
+	Completed int64
+	Total     int64
+}
+
+type Model struct {
+	Name              string    `json:"model"`
+	ModifiedAt        time.Time `json:"modified_at"`
+	Size              int64     `json:"size"`
+	Digest            string    `json:"digest"`
+	ParentModel       string    `json:"parent_model"`
+	Format            string    `json:"format"`
+	Family            string    `json:"family"`
+	Families          []string  `json:"families"`
+	ParameterSize     string    `json:"parameter_size"`
+	QuantizationLevel string    `json:"quantization_level"`
 }
 
 type OllamaRuntimeParams struct {
@@ -37,7 +57,7 @@ type OllamaRuntimeParams struct {
 	StartTimeout *time.Duration // How long to wait for ollama to start
 }
 
-func NewOllamaRuntime(ctx context.Context, params OllamaRuntimeParams) (*ollamaRuntime, error) {
+func NewOllamaRuntime(ctx context.Context, params OllamaRuntimeParams) (*OllamaRuntime, error) {
 	defaultCacheDir := os.TempDir()
 	if params.CacheDir == nil {
 		params.CacheDir = &defaultCacheDir
@@ -56,14 +76,16 @@ func NewOllamaRuntime(ctx context.Context, params OllamaRuntimeParams) (*ollamaR
 		log.Debug().Int("port", *params.Port).Msg("Found free port")
 	}
 
-	return &ollamaRuntime{
+	return &OllamaRuntime{
+		Runtime:      types.RuntimeOllama,
+		Version:      "unknown",
 		cacheDir:     *params.CacheDir,
 		port:         *params.Port,
 		startTimeout: *params.StartTimeout,
 	}, nil
 }
 
-func (i *ollamaRuntime) Start(ctx context.Context) error {
+func (i *OllamaRuntime) Start(ctx context.Context) error {
 	log.Debug().Msg("Starting Ollama runtime")
 
 	// Make sure the port is not already in use
@@ -81,12 +103,6 @@ func (i *ollamaRuntime) Start(ctx context.Context) error {
 	if _, err := os.Stat(i.cacheDir); os.IsPermission(err) {
 		return fmt.Errorf("cache dir is not writable: %s", i.cacheDir)
 	}
-
-	// Create openai client
-	config := openai.DefaultConfig("ollama")
-	config.BaseURL = fmt.Sprintf("http://localhost:%d/v1", i.port)
-	i.openaiClient = openai.NewClientWithConfig(config)
-	log.Debug().Str("base_url", config.BaseURL).Msg("Created openai client")
 
 	// Prepare ollama cmd context (a cancel context)
 	log.Debug().Msg("Preparing ollama context")
@@ -124,10 +140,23 @@ func (i *ollamaRuntime) Start(ctx context.Context) error {
 	}
 	log.Info().Msg("Ollama has started")
 
+	// Set the version
+	version, err := i.ollamaClient.Version(ctx)
+	if err != nil {
+		return fmt.Errorf("error getting ollama info: %w", err)
+	}
+	i.Version = version
+
+	// Create the openai client
+	i.OpenAIClient, err = CreateOpenaiClient(ctx, fmt.Sprintf("http://localhost:%d/v1", i.port))
+	if err != nil {
+		return fmt.Errorf("error creating openai client: %w", err)
+	}
+
 	return nil
 }
 
-func (i *ollamaRuntime) Stop() error {
+func (i *OllamaRuntime) Stop() error {
 	if i.cmd == nil {
 		return nil
 	}
@@ -142,7 +171,7 @@ func (i *ollamaRuntime) Stop() error {
 	return nil
 }
 
-func (i *ollamaRuntime) PullModel(ctx context.Context, modelName string, pullProgressFunc func(progress PullProgress) error) error {
+func (i *OllamaRuntime) PullModel(ctx context.Context, modelName string, pullProgressFunc func(progress PullProgress) error) error {
 	if i.ollamaClient == nil {
 		return fmt.Errorf("ollama client not initialized")
 	}
@@ -169,7 +198,7 @@ func (i *ollamaRuntime) PullModel(ctx context.Context, modelName string, pullPro
 	return nil
 }
 
-func (i *ollamaRuntime) ListModels(ctx context.Context) ([]Model, error) {
+func (i *OllamaRuntime) ListModels(ctx context.Context) ([]Model, error) {
 	if i.ollamaClient == nil {
 		return nil, fmt.Errorf("ollama client not initialized")
 	}
@@ -177,6 +206,7 @@ func (i *ollamaRuntime) ListModels(ctx context.Context) ([]Model, error) {
 	if err != nil {
 		return nil, fmt.Errorf("error listing models: %w", err)
 	}
+	log.Debug().Interface("models", models).Msg("models")
 
 	modelList := []Model{}
 	for _, model := range models.Models {
@@ -196,18 +226,30 @@ func (i *ollamaRuntime) ListModels(ctx context.Context) ([]Model, error) {
 	return modelList, nil
 }
 
-func (i *ollamaRuntime) Info(ctx context.Context) (*Info, error) {
-	version, err := i.ollamaClient.Version(ctx)
+func (i *OllamaRuntime) Warm(ctx context.Context, model string) error {
+	err := i.ollamaClient.Chat(ctx, &api.ChatRequest{
+		Model: model,
+		Messages: []api.Message{
+			{
+				Role:    "user",
+				Content: "Say the word 'warm'.",
+			},
+		},
+	}, func(response api.ChatResponse) error {
+		return nil
+	})
 	if err != nil {
-		return nil, fmt.Errorf("error getting ollama info: %w", err)
+		if strings.Contains(err.Error(), "does not support chat") {
+			_, err = i.ollamaClient.Embeddings(ctx, &api.EmbeddingRequest{
+				Model:  model,
+				Prompt: "Hello, world!",
+			})
+		}
 	}
-	return &Info{
-		Runtime: types.RuntimeOllama,
-		Version: version,
-	}, nil
+	return err
 }
 
-func (i *ollamaRuntime) waitUntilOllamaIsReady(ctx context.Context, startTimeout time.Duration) error {
+func (i *OllamaRuntime) waitUntilOllamaIsReady(ctx context.Context, startTimeout time.Duration) error {
 	startCtx, cancel := context.WithTimeout(ctx, startTimeout)
 	defer cancel()
 
@@ -261,8 +303,6 @@ func startOllamaCmd(ctx context.Context, commander Commander, port int, cacheDir
 	if err != nil {
 		return nil, err
 	}
-	// stream stderr to os.Stderr (so we can see it in the logs)
-	// and also the error buffer we will use to post the error to the api
 	go func() {
 		_, err := io.Copy(io.MultiWriter(stderrWriters...), stderrPipe)
 		if err != nil {
@@ -294,4 +334,11 @@ func isPortInUse(port int) bool {
 	}
 	conn.Close()
 	return true
+}
+
+func CreateOpenaiClient(ctx context.Context, url string) (*openai.Client, error) {
+	config := openai.DefaultConfig("ollama")
+	config.BaseURL = url
+	client := openai.NewClientWithConfig(config)
+	return client, nil
 }

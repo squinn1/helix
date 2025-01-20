@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/gorilla/mux"
 	"github.com/rs/zerolog/log"
 
@@ -21,19 +23,24 @@ import (
 const APIPrefix = "/api/v1"
 
 type RunnerServerOptions struct {
-	ID          string
-	Host        string
-	Port        int
-	SlotFactory SlotFactory
+	ID         string
+	Host       string
+	Port       int
+	CLIContext context.Context
 }
 
 type HelixRunnerAPIServer struct {
-	cfg *RunnerServerOptions
+	cfg        *RunnerServerOptions
+	slots      map[uuid.UUID]*Slot
+	cliContext context.Context
 }
 
 func NewHelixRunnerAPIServer(
 	cfg *RunnerServerOptions,
 ) (*HelixRunnerAPIServer, error) {
+	if cfg.CLIContext == nil {
+		return nil, fmt.Errorf("cli context is required")
+	}
 	if cfg.Host == "" {
 		cfg.Host = "127.0.0.1"
 	}
@@ -43,7 +50,9 @@ func NewHelixRunnerAPIServer(
 	}
 
 	return &HelixRunnerAPIServer{
-		cfg: cfg,
+		cfg:        cfg,
+		slots:      make(map[uuid.UUID]*Slot),
+		cliContext: cfg.CLIContext,
 	}, nil
 }
 
@@ -77,11 +86,10 @@ func (apiServer *HelixRunnerAPIServer) registerRoutes(_ context.Context) (*mux.R
 	subRouter.HandleFunc("/status", apiServer.status).Methods(http.MethodGet)
 	subRouter.HandleFunc("/slots", apiServer.createSlot).Methods(http.MethodPost)
 	subRouter.HandleFunc("/slots", apiServer.listSlots).Methods(http.MethodGet)
-	// subRouter.HandleFunc("/slots/{slot_id}/chat/completions", apiServer.createChatCompletion).Methods(http.MethodPost, http.MethodOptions)
-
-	// OpenAI API compatible routes
-	// router.HandleFunc("/chat/completions", apiServer.createChatCompletion).Methods(http.MethodPost, http.MethodOptions)
-	// router.HandleFunc("/models", apiServer.authMiddleware.auth(apiServer.listModels)).Methods(http.MethodGet)
+	subRouter.HandleFunc("/slots/{slot_id}", apiServer.deleteSlot).Methods(http.MethodDelete)
+	subRouter.HandleFunc("/slots/{slot_id}/v1/chat/completions", apiServer.createChatCompletion).Methods(http.MethodPost, http.MethodOptions)
+	subRouter.HandleFunc("/slots/{slot_id}/v1/models", apiServer.listModels).Methods(http.MethodGet, http.MethodOptions)
+	subRouter.HandleFunc("/slots/{slot_id}/v1/embeddings", apiServer.createEmbedding).Methods(http.MethodPost, http.MethodOptions)
 
 	// register pprof routes
 	router.PathPrefix("/debug/pprof/").Handler(http.DefaultServeMux)
@@ -108,36 +116,72 @@ func (apiServer *HelixRunnerAPIServer) createSlot(w http.ResponseWriter, r *http
 	slot := &types.CreateRunnerSlotRequest{}
 	json.NewDecoder(r.Body).Decode(slot)
 
-	log.Debug().Str("slot_id", slot.ID.String()).Msg("creating slot")
-
-	_, err := apiServer.cfg.SlotFactory.CreateSlot(r.Context(), slot)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+	// Validate the request
+	if slot.ID == uuid.Nil {
+		http.Error(w, "id is required", http.StatusBadRequest)
 		return
 	}
+	if slot.Attributes.Runtime == "" {
+		http.Error(w, "runtime is required", http.StatusBadRequest)
+		return
+	}
+	if slot.Attributes.Model == "" {
+		http.Error(w, "model is required", http.StatusBadRequest)
+		return
+	}
+
+	log.Debug().Str("slot_id", slot.ID.String()).Msg("creating slot")
+
+	// Must pass the context from the cli to ensure that the underlying runtime continues to run so
+	// long as the cli is running
+	s, err := CreateSlot(apiServer.cliContext, slot.ID, apiServer.cfg.ID, slot.Attributes.Runtime, slot.Attributes.Model)
+	if err != nil {
+		if strings.Contains(err.Error(), "pull model manifest: file does not exist") {
+			http.Error(w, err.Error(), http.StatusNotFound)
+		} else {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+		}
+		return
+	}
+	apiServer.slots[slot.ID] = s
 
 	// TODO(Phil): Return some representation of the slot
 	w.WriteHeader(http.StatusCreated)
 }
 
 func (apiServer *HelixRunnerAPIServer) listSlots(w http.ResponseWriter, r *http.Request) {
-	slots, err := apiServer.cfg.SlotFactory.ListSlots(r.Context())
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	slotList := make([]types.RunnerSlot, 0, len(slots))
-	for id, slot := range slots {
+	slotList := make([]types.RunnerSlot, 0, len(apiServer.slots))
+	for id, slot := range apiServer.slots {
 		slotList = append(slotList, types.RunnerSlot{
 			ID:      id,
-			Runtime: slot.Runtime,
-			Version: slot.Version,
+			Runtime: slot.Runtime.Runtime,
+			Version: slot.Runtime.Version,
+			Model:   slot.Model,
 		})
 	}
 	response := &types.ListRunnerSlotsResponse{
 		Slots: slotList,
 	}
 	json.NewEncoder(w).Encode(response)
-	w.WriteHeader(http.StatusOK)
+}
+
+func (apiServer *HelixRunnerAPIServer) deleteSlot(w http.ResponseWriter, r *http.Request) {
+	slotID := mux.Vars(r)["slot_id"]
+	slotUUID, err := uuid.Parse(slotID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	slot, ok := apiServer.slots[slotUUID]
+	if !ok {
+		http.Error(w, "slot not found", http.StatusNotFound)
+		return
+	}
+	err = slot.Runtime.Stop()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	delete(apiServer.slots, slotUUID)
+	w.WriteHeader(http.StatusNoContent)
 }

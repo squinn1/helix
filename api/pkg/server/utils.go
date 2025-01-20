@@ -49,6 +49,8 @@ func ErrorLoggingMiddleware(next http.Handler) http.Handler {
 		// Create a custom ResponseWriter that supports flushing
 		flushWriter := &flushResponseWriter{lrw}
 
+		log.Trace().Str("method", r.Method).Str("path", r.URL.Path).Msg("request")
+
 		// Call the next handler, which can be another middleware in the chain, or the final handler.
 		next.ServeHTTP(flushWriter, r)
 
@@ -57,7 +59,7 @@ func ErrorLoggingMiddleware(next http.Handler) http.Handler {
 			log.Warn().Msgf("unauthorized - method: %s, path: %s, status: %d\n", r.Method, r.URL.Path, lrw.statusCode)
 		default:
 			if lrw.statusCode >= 400 {
-				log.Error().Msgf("method: %s, path: %s, status: %d\n", r.Method, r.URL.Path, lrw.statusCode)
+				log.Warn().Str("method", r.Method).Str("path", r.URL.Path).Int("status", lrw.statusCode).Msg("response")
 			}
 		}
 	})
