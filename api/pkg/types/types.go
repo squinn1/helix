@@ -1512,3 +1512,19 @@ type RunAPIActionResponse struct {
 	Response string `json:"response"` // Raw response from the API
 	Error    string `json:"error"`
 }
+
+type RunnerAttributes struct {
+	TotalMemory uint64       `json:"total_memory"`
+	FreeMemory  uint64       `json:"free_memory"`
+	Version     string       `json:"version"`
+	Slots       []RunnerSlot `json:"slots"`
+}
+
+type Runner struct {
+	ID         string           `json:"id"`
+	Attributes RunnerAttributes `json:"attributes"`
+}
+
+type GetRunnersResponse struct {
+	Runners []Runner `json:"runners"`
+}

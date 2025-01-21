@@ -39,6 +39,7 @@ type Options struct {
 	ProviderManager      manager.ProviderManager
 	DataprepOpenAIClient openai.Client
 	Scheduler            scheduler.Scheduler
+	RunnerController     *RunnerController
 }
 
 type Controller struct {
@@ -63,7 +64,8 @@ type Controller struct {
 	// the current buffer of scheduling decisions
 	schedulingDecisions []*types.GlobalSchedulingDecision
 
-	scheduler scheduler.Scheduler
+	scheduler        scheduler.Scheduler
+	runnerController *RunnerController
 }
 
 func NewController(
@@ -103,6 +105,7 @@ func NewController(
 		activeRunners:       xsync.NewMapOf[string, *types.RunnerState](),
 		schedulingDecisions: []*types.GlobalSchedulingDecision{},
 		scheduler:           options.Scheduler,
+		runnerController:    options.RunnerController,
 	}
 
 	toolsOpenAIClient, err := controller.getClient(ctx, options.Config.Inference.Provider)

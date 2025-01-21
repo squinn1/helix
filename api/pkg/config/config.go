@@ -31,6 +31,7 @@ type ServerConfig struct {
 	Triggers           Triggers
 
 	DisableLLMCallLogging bool `envconfig:"DISABLE_LLM_CALL_LOGGING" default:"false"`
+	EnableSchedulerV2     bool `envconfig:"ENABLE_SCHEDULER_V2" default:"false"`
 }
 
 func LoadServerConfig() (ServerConfig, error) {

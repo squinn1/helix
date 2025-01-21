@@ -60,6 +60,7 @@ func NewNats(cfg *config.ServerConfig) (*Nats, error) {
 		}
 
 		// Start the server via goroutine
+		log.Info().Str("url", ns.ClientURL()).Msg("starting nats server")
 		go ns.Start()
 
 		// Wait for server to be ready for connections

@@ -54,6 +54,8 @@ func NewNatsController(ctx context.Context, config *NatsControllerConfig) (*Nats
 		return nil, err
 	}
 
+	// TODO(Phil): Also remember to register some way of detecting disconnection. It must reconnect.
+
 	return controller, nil
 }
 

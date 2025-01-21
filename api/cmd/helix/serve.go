@@ -26,6 +26,7 @@ import (
 	"github.com/helixml/helix/api/pkg/pubsub"
 	"github.com/helixml/helix/api/pkg/rag"
 	"github.com/helixml/helix/api/pkg/scheduler"
+	"github.com/helixml/helix/api/pkg/schedulerv2"
 	"github.com/helixml/helix/api/pkg/server"
 	"github.com/helixml/helix/api/pkg/store"
 	"github.com/helixml/helix/api/pkg/stripe"
@@ -236,6 +237,24 @@ func serve(cmd *cobra.Command, cfg *config.ServerConfig) error {
 		return fmt.Errorf("unknown extractor: %s", cfg.TextExtractor.Provider)
 	}
 
+	var runnerController *controller.RunnerController
+	if cfg.EnableSchedulerV2 {
+		runnerController, err = controller.NewRunnerController(ctx, &controller.RunnerControllerConfig{
+			PubSub:  ps,
+			Context: ctx,
+		})
+		if err != nil {
+			return err
+		}
+
+		_, err = schedulerv2.NewScheduler(cfg, &schedulerv2.SchedulerParams{
+			RunnerController: runnerController,
+		})
+		if err != nil {
+			return err
+		}
+	}
+
 	// Must use the same allocator for both new LLM requests and old sessions
 	scheduler := scheduler.NewScheduler(ctx, cfg, func(work *scheduler.Workload, err error) {
 		// This function describes what happens when errors occur in jobs.
@@ -337,6 +356,7 @@ func serve(cmd *cobra.Command, cfg *config.ServerConfig) error {
 		ProviderManager:      providerManager,
 		DataprepOpenAIClient: dataprepOpenAIClient,
 		Scheduler:            scheduler,
+		RunnerController:     runnerController,
 	}
 
 	appController, err = controller.NewController(ctx, controllerOptions)
