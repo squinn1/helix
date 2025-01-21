@@ -22,17 +22,24 @@ import (
 
 const APIPrefix = "/api/v1"
 
+var (
+	startTime = time.Now()
+)
+
 type RunnerServerOptions struct {
 	ID         string
 	Host       string
 	Port       int
 	CLIContext context.Context
+	Labels     map[string]string
 }
 
 type HelixRunnerAPIServer struct {
 	cfg        *RunnerServerOptions
 	slots      map[uuid.UUID]*Slot
 	cliContext context.Context
+	gpuManager *GPUManager
+	labels     map[string]string
 }
 
 func NewHelixRunnerAPIServer(
@@ -53,6 +60,8 @@ func NewHelixRunnerAPIServer(
 		cfg:        cfg,
 		slots:      make(map[uuid.UUID]*Slot),
 		cliContext: cfg.CLIContext,
+		gpuManager: NewGPUManager(),
+		labels:     cfg.Labels,
 	}, nil
 }
 
@@ -104,12 +113,15 @@ func (apiServer *HelixRunnerAPIServer) healthz(w http.ResponseWriter, r *http.Re
 
 func (apiServer *HelixRunnerAPIServer) status(w http.ResponseWriter, r *http.Request) {
 	status := &types.RunnerStatus{
-		ID:      apiServer.cfg.ID,
-		Created: time.Now(),
-		Version: data.GetHelixVersion(),
+		ID:          apiServer.cfg.ID,
+		Created:     startTime,
+		Updated:     time.Now(),
+		Version:     data.GetHelixVersion(),
+		TotalMemory: apiServer.gpuManager.GetTotalMemory(),
+		FreeMemory:  apiServer.gpuManager.GetFreeMemory(),
+		Labels:      apiServer.cfg.Labels,
 	}
 	json.NewEncoder(w).Encode(status)
-	w.WriteHeader(http.StatusOK)
 }
 
 func (apiServer *HelixRunnerAPIServer) createSlot(w http.ResponseWriter, r *http.Request) {

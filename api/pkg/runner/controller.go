@@ -135,6 +135,7 @@ func NewRunner(
 		Host:       options.WebServer.Host,
 		Port:       options.WebServer.Port,
 		CLIContext: ctx,
+		Labels:     options.Labels,
 	})
 	if err != nil {
 		return nil, err
