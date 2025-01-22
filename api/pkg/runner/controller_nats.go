@@ -124,6 +124,11 @@ func (c *NatsController) executeTaskViaHTTP(ctx context.Context, headers nats.He
 	defer resp.Body.Close()
 
 	if headers.Get(pubsub.BodyTypeHeader) == pubsub.BodyTypeLLMInferenceRequest {
+		var llmReq types.RunnerLLMInferenceRequest
+		if err := json.Unmarshal([]byte(task.Body), &llmReq); err != nil {
+			return &types.Response{StatusCode: 400, Body: "Unable to parse request body"}
+		}
+
 		// Check if this response is a streaming response
 		contentType := resp.Header.Get("Content-Type")
 		if strings.Contains(contentType, "text/event-stream") {
@@ -165,10 +170,10 @@ func (c *NatsController) executeTaskViaHTTP(ctx context.Context, headers nats.He
 
 					// Create a response object for each chunk
 					infResponse := &types.RunnerLLMInferenceResponse{
-						RequestID:      headers.Get(pubsub.RequestIDHeader),
-						OwnerID:        headers.Get(pubsub.OwnerIDHeader),
-						SessionID:      headers.Get(pubsub.SessionIDHeader),
-						InteractionID:  headers.Get(pubsub.InteractionIDHeader),
+						RequestID:      llmReq.RequestID,
+						OwnerID:        llmReq.OwnerID,
+						SessionID:      llmReq.SessionID,
+						InteractionID:  llmReq.InteractionID,
 						DurationMs:     time.Since(start).Milliseconds(),
 						Done:           streamResp.Choices[0].FinishReason != "",
 						StreamResponse: &streamResp,
@@ -201,10 +206,10 @@ func (c *NatsController) executeTaskViaHTTP(ctx context.Context, headers nats.He
 
 			// Create a response object for each chunk
 			infResponse := &types.RunnerLLMInferenceResponse{
-				RequestID:     headers.Get(pubsub.RequestIDHeader),
-				OwnerID:       headers.Get(pubsub.OwnerIDHeader),
-				SessionID:     headers.Get(pubsub.SessionIDHeader),
-				InteractionID: headers.Get(pubsub.InteractionIDHeader),
+				RequestID:     llmReq.RequestID,
+				OwnerID:       llmReq.OwnerID,
+				SessionID:     llmReq.SessionID,
+				InteractionID: llmReq.InteractionID,
 				DurationMs:    time.Since(start).Milliseconds(),
 				Done:          chatResp.Choices[0].FinishReason != "",
 				Response:      &chatResp,
