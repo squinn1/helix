@@ -81,9 +81,8 @@ func NewNatsController(ctx context.Context, config *NatsControllerConfig) (*Nats
 	if err == nil {
 		// Stream exists, create or update consumer
 		consumer, err := stream.CreateOrUpdateConsumer(ctx, jetstream.ConsumerConfig{
-			Name:          fmt.Sprintf("CONSUMER_%s", config.RunnerID),
-			FilterSubject: "*",
-			AckPolicy:     jetstream.AckExplicitPolicy,
+			Name:      fmt.Sprintf("CONSUMER_%s", config.RunnerID),
+			AckPolicy: jetstream.AckExplicitPolicy,
 		})
 		if err != nil {
 			return nil, fmt.Errorf("failed to create consumer: %w", err)
