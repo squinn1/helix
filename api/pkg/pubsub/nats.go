@@ -19,7 +19,6 @@ import (
 const (
 	scriptStreamName         = "SCRIPTS_STREAM"
 	scriptsSubject           = "SCRIPTS.*"
-	helixNatsReplyHeader     = "helix-reply"
 	helixNatsSubjectHeader   = "helix-subject"
 	helixNatsStreamingHeader = "streaming"
 )
@@ -256,7 +255,7 @@ func (n *Nats) QueueRequest(ctx context.Context, _, subject string, payload []by
 		hdr.Set(k, v)
 	}
 
-	hdr.Set(helixNatsReplyHeader, replyInbox)
+	hdr.Set(HelixNatsReplyHeader, replyInbox)
 	hdr.Set(helixNatsSubjectHeader, subject)
 
 	// Publish the message to NATS
@@ -282,7 +281,7 @@ func (n *Nats) QueueRequest(ctx context.Context, _, subject string, payload []by
 func (n *Nats) QueueSubscribe(_ context.Context, queue, subject string, handler func(msg *Message) error) (Subscription, error) {
 	sub, err := n.conn.QueueSubscribe(subject, queue, func(msg *nats.Msg) {
 		err := handler(&Message{
-			Reply:  msg.Header.Get(helixNatsReplyHeader),
+			Reply:  msg.Header.Get(HelixNatsReplyHeader),
 			Data:   msg.Data,
 			Type:   msg.Header.Get(helixNatsSubjectHeader),
 			Header: msg.Header,
@@ -323,7 +322,7 @@ func (n *Nats) StreamRequest(ctx context.Context, stream, subject string, payloa
 		hdr.Set(k, v)
 	}
 
-	hdr.Set(helixNatsReplyHeader, replyInbox)
+	hdr.Set(HelixNatsReplyHeader, replyInbox)
 	hdr.Set(helixNatsSubjectHeader, subject)
 
 	// streamTopic := getStreamSub(stream, subject) + "." + nuid.Next()
@@ -412,7 +411,7 @@ func (n *Nats) StreamConsume(ctx context.Context, stream, subject string, handle
 
 				err = handler(&Message{
 					Type:   msg.Headers().Get(helixNatsSubjectHeader),
-					Reply:  msg.Headers().Get(helixNatsReplyHeader),
+					Reply:  msg.Headers().Get(HelixNatsReplyHeader),
 					Data:   msg.Data(),
 					Header: msg.Headers(),
 					msg:    msg,
@@ -497,7 +496,7 @@ func (n *Nats) StreamChatRequest(ctx context.Context, stream, subject string, pa
 		hdr.Set(k, v)
 	}
 
-	hdr.Set(helixNatsReplyHeader, replyInbox)
+	hdr.Set(HelixNatsReplyHeader, replyInbox)
 	hdr.Set(helixNatsSubjectHeader, subject)
 	hdr.Set(helixNatsStreamingHeader, "true")
 
