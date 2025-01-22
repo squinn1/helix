@@ -17,6 +17,11 @@ type Response struct {
 	Body       string `json:"body"`
 }
 
+type StreamingResponse struct {
+	Body string `json:"body"`
+	Done bool   `json:"done"`
+}
+
 type RunnerStatus struct {
 	ID          string            `json:"id"`
 	Created     time.Time         `json:"created"`

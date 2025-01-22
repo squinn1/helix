@@ -330,17 +330,9 @@ func (s *Scheduler) AllocateSlot(slotID uuid.UUID, req *scheduler.Workload) erro
 	slot.Start()
 	switch req.WorkloadType {
 	case scheduler.WorkloadTypeLLMInferenceRequest:
-		if req.LLMInferenceRequest().Request.Stream {
-			err := s.controller.SubmitStreamingChatCompletionRequest(s.ctx, slot, req.LLMInferenceRequest())
-			if err != nil {
-				log.Error().Err(err).Msg("error submitting streaming chat completion request")
-			}
-			// Don't release the slot here - it will be released when streaming is complete
-		} else {
-			err := s.controller.SubmitChatCompletionRequest(slot, req.LLMInferenceRequest())
-			if err != nil {
-				log.Error().Err(err).Msg("error submitting chat completion request")
-			}
+		err := s.controller.SubmitChatCompletionRequest(slot, req.LLMInferenceRequest())
+		if err != nil {
+			log.Error().Err(err).Msg("error submitting chat completion request")
 		}
 	case scheduler.WorkloadTypeSession:
 		panic("not implemented")

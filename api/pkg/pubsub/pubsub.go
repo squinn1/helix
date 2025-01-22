@@ -12,19 +12,18 @@ import (
 type Publisher interface {
 	// Publish topic to message broker with payload.
 	Publish(ctx context.Context, topic string, payload []byte) error
+	PublishWithHeader(ctx context.Context, topic string, header map[string]string, payload []byte) error
 }
 
 type PubSub interface {
 	Publisher
 	Subscribe(ctx context.Context, topic string, handler func(payload []byte) error) (Subscription, error)
 	SubscribeWithCtx(ctx context.Context, topic string, handler func(ctx context.Context, msg *nats.Msg) error) (Subscription, error)
-	Request(ctx context.Context, sub string, payload []byte, timeout time.Duration) ([]byte, error)
+	Request(ctx context.Context, sub string, header map[string]string, payload []byte, timeout time.Duration) ([]byte, error)
 	QueueRequest(ctx context.Context, stream, sub string, payload []byte, header map[string]string, timeout time.Duration) ([]byte, error)
 	QueueSubscribe(ctx context.Context, stream, sub string, handler func(msg *Message) error) (Subscription, error)
 	StreamRequest(ctx context.Context, stream, sub string, payload []byte, header map[string]string, timeout time.Duration) ([]byte, error)
 	StreamConsume(ctx context.Context, stream, sub string, handler func(msg *Message) error) (Subscription, error)
-	StreamChatRequest(ctx context.Context, stream, subject string, payload []byte, header map[string]string) (<-chan []byte, error)
-	StreamChatRespond(ctx context.Context, msg *Message, data []byte) error
 }
 
 type Message struct {
@@ -81,6 +80,10 @@ const (
 	RunnerQueue          = "runner"
 	HelixNatsReplyHeader = "helix-nats-reply"
 	StreamingHeader      = "streaming"
+	RequestIDHeader      = "request-id"
+	OwnerIDHeader        = "owner-id"
+	SessionIDHeader      = "session-id"
+	InteractionIDHeader  = "interaction-id"
 )
 
 func getStreamSub(stream, sub string) string {

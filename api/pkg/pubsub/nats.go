@@ -2,10 +2,8 @@ package pubsub
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
-	"strings"
 	"sync"
 	"time"
 
@@ -17,10 +15,10 @@ import (
 )
 
 const (
-	scriptStreamName         = "SCRIPTS_STREAM"
-	scriptsSubject           = "SCRIPTS.*"
-	helixNatsSubjectHeader   = "helix-subject"
-	helixNatsStreamingHeader = "streaming"
+	scriptStreamName       = "SCRIPTS_STREAM"
+	scriptsSubject         = "SCRIPTS.*"
+	helixNatsReplyHeader   = "helix-reply"
+	helixNatsSubjectHeader = "helix-subject"
 )
 
 type Nats struct {
@@ -31,9 +29,6 @@ type Nats struct {
 
 	consumerMu sync.Mutex
 	consumer   jetstream.Consumer
-
-	// Keep track of the embedded server if we're running one
-	embeddedServer *server.Server
 }
 
 // NewNats creates a new NATS instance with the given configuration
@@ -107,8 +102,12 @@ func NewNats(cfg *config.ServerConfig) (*Nats, error) {
 		Name:      scriptStreamName,
 		Subjects:  []string{scriptsSubject},
 		Retention: jetstream.WorkQueuePolicy,
-		Discard:   jetstream.DiscardOld,
-		MaxAge:    5 * time.Minute, // Discard messages older than 5 minutes
+		// Storage:   jetstream.MemoryStorage,
+		Discard: jetstream.DiscardOld,
+		MaxAge:  5 * time.Minute, // Discard messages older than 5 minutes
+		// ConsumerLimits: jetstream.StreamConsumerLimits{
+		// 	MaxAckPending: 20,
+		// },
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to create internal jetstream stream: %w", err)
@@ -119,7 +118,8 @@ func NewNats(cfg *config.ServerConfig) (*Nats, error) {
 		AckPolicy:      jetstream.AckExplicitPolicy,
 		FilterSubjects: []string{getStreamSub(ScriptRunnerStream, AppQueue)},
 		AckWait:        5 * time.Second,
-		ReplayPolicy:   jetstream.ReplayInstantPolicy,
+		// MemoryStorage:  true,
+		ReplayPolicy: jetstream.ReplayInstantPolicy,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to create consumer: %w", err)
@@ -147,11 +147,10 @@ func NewNats(cfg *config.ServerConfig) (*Nats, error) {
 	}()
 
 	return &Nats{
-		conn:           nc,
-		js:             js,
-		stream:         stream,
-		consumer:       c,
-		embeddedServer: ns,
+		conn:     nc,
+		js:       js,
+		stream:   stream,
+		consumer: c,
 	}, nil
 }
 
@@ -221,11 +220,37 @@ func (n *Nats) Publish(_ context.Context, topic string, payload []byte) error {
 	return n.conn.Publish(topic, payload)
 }
 
-func (n *Nats) Request(ctx context.Context, sub string, payload []byte, timeout time.Duration) ([]byte, error) {
+func (n *Nats) PublishWithHeader(_ context.Context, topic string, header map[string]string, payload []byte) error {
+	hdr := nats.Header{}
+
+	for k, v := range header {
+		hdr.Set(k, v)
+	}
+
+	return n.conn.PublishMsg(&nats.Msg{
+		Subject: topic,
+		Data:    payload,
+		Header:  hdr,
+	})
+}
+
+func (n *Nats) Request(ctx context.Context, sub string, header map[string]string, payload []byte, timeout time.Duration) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	msg, err := n.conn.RequestWithContext(ctx, sub, payload)
+	hdr := nats.Header{}
+
+	for k, v := range header {
+		hdr.Set(k, v)
+	}
+
+	msg := &nats.Msg{
+		Subject: sub,
+		Data:    payload,
+		Header:  hdr,
+	}
+
+	msg, err := n.conn.RequestMsgWithContext(ctx, msg)
 	if err != nil {
 		return nil, fmt.Errorf("failed to request message: %w", err)
 	}
@@ -255,7 +280,7 @@ func (n *Nats) QueueRequest(ctx context.Context, _, subject string, payload []by
 		hdr.Set(k, v)
 	}
 
-	hdr.Set(HelixNatsReplyHeader, replyInbox)
+	hdr.Set(helixNatsReplyHeader, replyInbox)
 	hdr.Set(helixNatsSubjectHeader, subject)
 
 	// Publish the message to NATS
@@ -281,7 +306,7 @@ func (n *Nats) QueueRequest(ctx context.Context, _, subject string, payload []by
 func (n *Nats) QueueSubscribe(_ context.Context, queue, subject string, handler func(msg *Message) error) (Subscription, error) {
 	sub, err := n.conn.QueueSubscribe(subject, queue, func(msg *nats.Msg) {
 		err := handler(&Message{
-			Reply:  msg.Header.Get(HelixNatsReplyHeader),
+			Reply:  msg.Header.Get(helixNatsReplyHeader),
 			Data:   msg.Data,
 			Type:   msg.Header.Get(helixNatsSubjectHeader),
 			Header: msg.Header,
@@ -322,7 +347,7 @@ func (n *Nats) StreamRequest(ctx context.Context, stream, subject string, payloa
 		hdr.Set(k, v)
 	}
 
-	hdr.Set(HelixNatsReplyHeader, replyInbox)
+	hdr.Set(helixNatsReplyHeader, replyInbox)
 	hdr.Set(helixNatsSubjectHeader, subject)
 
 	// streamTopic := getStreamSub(stream, subject) + "." + nuid.Next()
@@ -411,7 +436,7 @@ func (n *Nats) StreamConsume(ctx context.Context, stream, subject string, handle
 
 				err = handler(&Message{
 					Type:   msg.Headers().Get(helixNatsSubjectHeader),
-					Reply:  msg.Headers().Get(HelixNatsReplyHeader),
+					Reply:  msg.Headers().Get(helixNatsReplyHeader),
 					Data:   msg.Data(),
 					Header: msg.Headers(),
 					msg:    msg,
@@ -449,116 +474,4 @@ func gcJetStream(js jetstream.JetStream) {
 			}
 		}
 	}
-}
-
-// StreamChatRequest initiates a streaming chat request and returns a channel that receives responses
-func (n *Nats) StreamChatRequest(ctx context.Context, stream, subject string, payload []byte, header map[string]string) (<-chan []byte, error) {
-	replyInbox := nats.NewInbox()
-	dataCh := make(chan []byte)
-
-	// Create a context with timeout
-	ctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
-
-	// Subscribe to the reply inbox to receive streaming responses
-	sub, err := n.conn.Subscribe(replyInbox, func(msg *nats.Msg) {
-		select {
-		case <-ctx.Done():
-			return
-		case dataCh <- msg.Data:
-			// Check if this is a completion message
-			var streamResp struct {
-				Choices []struct {
-					FinishReason string `json:"finish_reason"`
-				} `json:"choices"`
-			}
-			if err := json.Unmarshal(msg.Data, &streamResp); err == nil {
-				if len(streamResp.Choices) > 0 && streamResp.Choices[0].FinishReason == "stop" {
-					cancel() // This will trigger cleanup
-					return
-				}
-			}
-		}
-	})
-	if err != nil {
-		cancel()
-		return nil, err
-	}
-
-	// Clean up subscription when context is done
-	go func() {
-		<-ctx.Done()
-		sub.Unsubscribe()
-		close(dataCh)
-	}()
-
-	hdr := nats.Header{}
-	for k, v := range header {
-		hdr.Set(k, v)
-	}
-
-	hdr.Set(HelixNatsReplyHeader, replyInbox)
-	hdr.Set(helixNatsSubjectHeader, subject)
-	hdr.Set(helixNatsStreamingHeader, "true")
-
-	streamTopic := getStreamSub(stream, subject)
-
-	// Create a valid stream name (only alphanumeric and underscores allowed)
-	streamName := fmt.Sprintf("STREAM_%s", strings.Map(func(r rune) rune {
-		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '_' {
-			return r
-		}
-		return '_'
-	}, stream))
-
-	// Ensure the stream exists
-	_, err = n.js.CreateStream(ctx, jetstream.StreamConfig{
-		Name:      streamName,
-		Subjects:  []string{fmt.Sprintf("%s.>", stream)},
-		Retention: jetstream.WorkQueuePolicy,
-		MaxAge:    5 * time.Minute,
-	})
-	if err != nil && !strings.Contains(err.Error(), "stream name already in use") {
-		cancel()
-		sub.Unsubscribe()
-		close(dataCh)
-		return nil, fmt.Errorf("failed to create stream: %w", err)
-	}
-
-	log.Trace().Str("stream_name", streamName).Msg("publishing to stream")
-	// Publish the request to the JetStream with retry options
-	_, err = n.js.PublishMsg(ctx, &nats.Msg{
-		Subject: streamTopic,
-		Data:    payload,
-		Header:  hdr,
-	},
-		jetstream.WithRetryAttempts(5),
-		jetstream.WithRetryWait(100*time.Millisecond),
-	)
-	if err != nil {
-		cancel()
-		sub.Unsubscribe()
-		close(dataCh)
-		return nil, fmt.Errorf("failed to publish message to jetstream: %w", err)
-	}
-
-	return dataCh, nil
-}
-
-// StreamChatRespond sends a streaming response back to the requester
-func (n *Nats) StreamChatRespond(ctx context.Context, msg *Message, data []byte) error {
-	if msg.Reply == "" {
-		return fmt.Errorf("no reply subject in message")
-	}
-
-	log.Trace().Str("reply", msg.Reply).Msg("sending response")
-	// Send the response chunk back through the reply subject
-	return n.conn.Publish(msg.Reply, data)
-}
-
-func (n *Nats) GetJetStream() jetstream.JetStream {
-	return n.js
-}
-
-func (n *Nats) GetConnection() *nats.Conn {
-	return n.conn
 }

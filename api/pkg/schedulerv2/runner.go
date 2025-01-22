@@ -14,7 +14,6 @@ import (
 	"github.com/helixml/helix/api/pkg/types"
 	"github.com/nats-io/nats.go"
 	"github.com/rs/zerolog/log"
-	openai "github.com/sashabaranov/go-openai"
 )
 
 type RunnerController struct {
@@ -58,7 +57,7 @@ func NewRunnerController(ctx context.Context, cfg *RunnerControllerConfig) (*Run
 	return controller, nil
 }
 
-func (r *RunnerController) Send(ctx context.Context, runnerId string, req *types.Request) (*types.Response, error) {
+func (r *RunnerController) Send(ctx context.Context, runnerId string, headers map[string]string, req *types.Request) (*types.Response, error) {
 	log.Trace().Str("runner_id", runnerId).Interface("request", req).Msg("sending request to runner")
 	data, err := json.Marshal(req)
 	if err != nil {
@@ -66,7 +65,7 @@ func (r *RunnerController) Send(ctx context.Context, runnerId string, req *types
 	}
 
 	// Publish the task to the "tasks" subject
-	response, err := r.ps.Request(ctx, pubsub.GetRunnerQueue(runnerId), data, 5*time.Minute) // TODO(phil): some requests are long running, so we need to make this configurable
+	response, err := r.ps.Request(ctx, pubsub.GetRunnerQueue(runnerId), headers, data, 5*time.Minute) // TODO(phil): some requests are long running, so we need to make this configurable
 	if err != nil {
 		return nil, fmt.Errorf("error sending request to runner: %w", err)
 	}
@@ -133,13 +132,20 @@ func (c *RunnerController) Slots(runnerID string) ([]types.RunnerSlot, error) {
 }
 
 func (c *RunnerController) SubmitChatCompletionRequest(slot *scheduler.Slot, req *types.RunnerLLMInferenceRequest) error {
-	req.Request.Stream = false // TODO(phil): not sure how to handle streaming yet.
+	headers := map[string]string{}
+	headers[pubsub.RequestIDHeader] = req.RequestID
+	headers[pubsub.OwnerIDHeader] = req.OwnerID
+	headers[pubsub.SessionIDHeader] = req.SessionID
+	headers[pubsub.InteractionIDHeader] = req.InteractionID
+	if req.Request.Stream {
+		headers[pubsub.HelixNatsReplyHeader] = pubsub.GetRunnerResponsesQueue(req.OwnerID, req.RequestID)
+	}
+
 	body, err := json.Marshal(req.Request)
 	if err != nil {
 		return err
 	}
-	start := time.Now()
-	resp, err := c.Send(c.ctx, slot.RunnerID, &types.Request{
+	resp, err := c.Send(c.ctx, slot.RunnerID, headers, &types.Request{
 		Method: "POST",
 		URL:    fmt.Sprintf("/api/v1/slots/%s/v1/chat/completions", slot.ID),
 		Body:   string(body),
@@ -147,27 +153,10 @@ func (c *RunnerController) SubmitChatCompletionRequest(slot *scheduler.Slot, req
 	if err != nil {
 		return err
 	}
-	var res openai.ChatCompletionResponse
-	if err := json.Unmarshal([]byte(resp.Body), &res); err != nil {
-		return err
+	if resp.StatusCode != http.StatusCreated {
+		return fmt.Errorf("error submitting chat completion request: %s", resp.Body)
 	}
-	oldResp := &types.RunnerLLMInferenceResponse{
-		RequestID:     req.RequestID,
-		OwnerID:       req.OwnerID,
-		SessionID:     req.SessionID,
-		InteractionID: req.InteractionID,
-		Response:      &res,
-		DurationMs:    time.Since(start).Milliseconds(),
-		Done:          true,
-	}
-	bts, err := json.Marshal(oldResp)
-	if err != nil {
-		return err
-	}
-	err = c.ps.Publish(c.ctx, pubsub.GetRunnerResponsesQueue(req.OwnerID, req.RequestID), bts)
-	if err != nil {
-		return fmt.Errorf("error publishing runner response: %w", err)
-	}
+
 	return nil
 }
 
@@ -183,7 +172,7 @@ func (c *RunnerController) CreateSlot(slot *scheduler.Slot) error {
 	if err != nil {
 		return err
 	}
-	resp, err := c.Send(c.ctx, slot.RunnerID, &types.Request{
+	resp, err := c.Send(c.ctx, slot.RunnerID, nil, &types.Request{
 		Method: "POST",
 		URL:    "/api/v1/slots",
 		Body:   string(body),
@@ -198,7 +187,7 @@ func (c *RunnerController) CreateSlot(slot *scheduler.Slot) error {
 }
 
 func (c *RunnerController) getStatus(runnerID string) (*types.RunnerStatus, error) {
-	resp, err := c.Send(c.ctx, runnerID, &types.Request{
+	resp, err := c.Send(c.ctx, runnerID, nil, &types.Request{
 		Method: "GET",
 		URL:    "/api/v1/status",
 	})
@@ -213,7 +202,7 @@ func (c *RunnerController) getStatus(runnerID string) (*types.RunnerStatus, erro
 }
 
 func (c *RunnerController) getSlots(runnerID string) (*types.ListRunnerSlotsResponse, error) {
-	resp, err := c.Send(c.ctx, runnerID, &types.Request{
+	resp, err := c.Send(c.ctx, runnerID, nil, &types.Request{
 		Method: "GET",
 		URL:    "/api/v1/slots",
 	})
@@ -225,93 +214,4 @@ func (c *RunnerController) getSlots(runnerID string) (*types.ListRunnerSlotsResp
 		return nil, err
 	}
 	return &slots, nil
-}
-
-func (c *RunnerController) SubmitStreamingChatCompletionRequest(ctx context.Context, slot *scheduler.Slot, req *types.RunnerLLMInferenceRequest) error {
-	req.Request.Stream = true // Ensure streaming is enabled
-	body, err := json.Marshal(req.Request)
-	if err != nil {
-		return fmt.Errorf("error marshalling request: %w", err)
-	}
-
-	// Create a request to the runner's chat completion endpoint
-	runnerRequest := &types.Request{
-		Method: "POST",
-		URL:    fmt.Sprintf("/api/v1/slots/%s/v1/chat/completions", slot.ID),
-		Body:   string(body),
-	}
-
-	// Convert the runner request to bytes
-	requestData, err := json.Marshal(runnerRequest)
-	if err != nil {
-		return fmt.Errorf("error marshalling runner request: %w", err)
-	}
-
-	// Use NATS streaming to send the request and get a response channel
-	log.Trace().Str("runner_id", slot.RunnerID).Str("request_id", req.RequestID).Msg("sending streaming request to runner")
-	responseCh, err := c.ps.StreamChatRequest(ctx, pubsub.GetRunnerQueue(slot.RunnerID), runnerRequest.URL, requestData, map[string]string{
-		"request_id":     req.RequestID,
-		"owner_id":       req.OwnerID,
-		"session_id":     req.SessionID,
-		"interaction_id": req.InteractionID,
-	})
-	if err != nil {
-		return fmt.Errorf("error initiating streaming request: %w", err)
-	}
-
-	// Process streaming responses in a goroutine
-	go func() {
-		start := time.Now()
-		for chunk := range responseCh {
-			// Try to unmarshal the chunk into a ChatCompletionStreamResponse
-			var streamResp openai.ChatCompletionStreamResponse
-			if err := json.Unmarshal(chunk, &streamResp); err != nil {
-				log.Error().Err(err).Msg("error unmarshalling stream response")
-				continue
-			}
-
-			// Create a response object for each chunk
-			resp := &types.RunnerLLMInferenceResponse{
-				RequestID:     req.RequestID,
-				OwnerID:       req.OwnerID,
-				SessionID:     req.SessionID,
-				InteractionID: req.InteractionID,
-				DurationMs:    time.Since(start).Milliseconds(),
-				Done:          streamResp.Choices[0].FinishReason != "",
-			}
-			log.Trace().Str("runner_id", slot.RunnerID).Str("request_id", req.RequestID).Str("interaction_id", req.InteractionID).Str("session_id", req.SessionID).Str("owner_id", req.OwnerID).Str("duration_ms", fmt.Sprintf("%d", resp.DurationMs)).Bool("done", resp.Done).Msg("received stream response")
-
-			// Convert stream response to regular response format
-			resp.Response = &openai.ChatCompletionResponse{
-				ID:      streamResp.ID,
-				Object:  streamResp.Object,
-				Created: streamResp.Created,
-				Model:   streamResp.Model,
-				Choices: []openai.ChatCompletionChoice{
-					{
-						Index: streamResp.Choices[0].Index,
-						Message: openai.ChatCompletionMessage{
-							Role:    streamResp.Choices[0].Delta.Role,
-							Content: streamResp.Choices[0].Delta.Content,
-						},
-						FinishReason: streamResp.Choices[0].FinishReason,
-					},
-				},
-			}
-
-			// Marshal and publish the response
-			respData, err := json.Marshal(resp)
-			if err != nil {
-				log.Error().Err(err).Msg("error marshalling response")
-				continue
-			}
-
-			// Publish to the responses queue
-			if err := c.ps.Publish(ctx, pubsub.GetRunnerResponsesQueue(req.OwnerID, req.RequestID), respData); err != nil {
-				log.Error().Err(err).Msg("error publishing response")
-			}
-		}
-	}()
-
-	return nil
 }
