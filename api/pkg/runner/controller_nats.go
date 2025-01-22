@@ -97,7 +97,6 @@ func (c *NatsController) executeTaskViaHTTP(ctx context.Context, headers nats.He
 
 	start := time.Now()
 	var req *http.Request
-	var replySubject string
 	if headers.Get(pubsub.BodyTypeHeader) == pubsub.BodyTypeLLMInferenceRequest {
 		var llmReq types.RunnerLLMInferenceRequest
 		if err := json.Unmarshal([]byte(task.Body), &llmReq); err != nil {
@@ -128,6 +127,8 @@ func (c *NatsController) executeTaskViaHTTP(ctx context.Context, headers nats.He
 		if err := json.Unmarshal([]byte(task.Body), &llmReq); err != nil {
 			return &types.Response{StatusCode: 400, Body: "Unable to parse request body"}
 		}
+
+		replySubject := pubsub.GetRunnerResponsesQueue(llmReq.OwnerID, llmReq.RequestID)
 
 		// Check if this response is a streaming response
 		contentType := resp.Header.Get("Content-Type")
