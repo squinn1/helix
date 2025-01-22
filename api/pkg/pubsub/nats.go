@@ -21,6 +21,17 @@ const (
 	helixNatsSubjectHeader = "helix-subject"
 )
 
+// ConnectionStatus represents the current connection state
+type ConnectionStatus string
+
+const (
+	Connected    ConnectionStatus = "connected"
+	Disconnected ConnectionStatus = "disconnected"
+	Reconnecting ConnectionStatus = "reconnecting"
+)
+
+type ConnectionStatusHandler func(status ConnectionStatus)
+
 type Nats struct {
 	conn *nats.Conn
 	js   jetstream.JetStream
@@ -29,6 +40,50 @@ type Nats struct {
 
 	consumerMu sync.Mutex
 	consumer   jetstream.Consumer
+
+	statusHandlers []ConnectionStatusHandler
+	statusMu       sync.RWMutex
+}
+
+func (n *Nats) OnConnectionStatus(handler ConnectionStatusHandler) {
+	n.statusMu.Lock()
+	defer n.statusMu.Unlock()
+	n.statusHandlers = append(n.statusHandlers, handler)
+}
+
+func (n *Nats) notifyStatusChange(status ConnectionStatus) {
+	n.statusMu.RLock()
+	defer n.statusMu.RUnlock()
+	for _, handler := range n.statusHandlers {
+		handler(status)
+	}
+}
+
+func setupConnectionHandlers(nc *nats.Conn, n *Nats) {
+	nc.SetDisconnectErrHandler(func(_ *nats.Conn, err error) {
+		log.Warn().Err(err).Msg("nats connection lost")
+		n.notifyStatusChange(Disconnected)
+	})
+
+	nc.SetReconnectHandler(func(_ *nats.Conn) {
+		log.Info().Msg("nats reconnecting")
+		n.notifyStatusChange(Reconnecting)
+	})
+
+	nc.SetClosedHandler(func(_ *nats.Conn) {
+		log.Warn().Msg("nats connection closed")
+		n.notifyStatusChange(Disconnected)
+	})
+
+	nc.SetDiscoveredServersHandler(func(_ *nats.Conn) {
+		log.Debug().Strs("servers", nc.DiscoveredServers()).Msg("discovered nats servers")
+	})
+
+	// Use reconnect handler for connected state since there's no specific connected handler
+	nc.SetReconnectHandler(func(_ *nats.Conn) {
+		log.Info().Msg("nats connected")
+		n.notifyStatusChange(Connected)
+	})
 }
 
 // NewNats creates a new NATS instance with the given configuration
@@ -146,12 +201,21 @@ func NewNats(cfg *config.ServerConfig) (*Nats, error) {
 		}
 	}()
 
-	return &Nats{
-		conn:     nc,
-		js:       js,
-		stream:   stream,
-		consumer: c,
-	}, nil
+	n := &Nats{
+		conn:           nc,
+		js:             js,
+		stream:         stream,
+		consumer:       c,
+		statusHandlers: make([]ConnectionStatusHandler, 0),
+	}
+
+	// Setup connection monitoring
+	setupConnectionHandlers(nc, n)
+
+	// Initial connection status
+	n.notifyStatusChange(Connected)
+
+	return n, nil
 }
 
 // NewInMemoryNats creates a new in-memory NATS instance for testing
@@ -172,7 +236,19 @@ func NewInMemoryNats() (*Nats, error) {
 }
 
 func NewNatsClient(url string, token string) (*Nats, error) {
-	nc, err := nats.Connect(url, nats.Token(token))
+	opts := []nats.Option{
+		nats.Token(token),
+		nats.RetryOnFailedConnect(true),
+		nats.MaxReconnects(-1), // Infinite reconnects
+		nats.ReconnectWait(time.Second * 2),
+		nats.DisconnectErrHandler(func(_ *nats.Conn, err error) {
+			if err != nil {
+				log.Warn().Err(err).Msg("nats disconnected due to error")
+			}
+		}),
+	}
+
+	nc, err := nats.Connect(url, opts...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to nats: %w", err)
 	}
@@ -182,10 +258,19 @@ func NewNatsClient(url string, token string) (*Nats, error) {
 		return nil, fmt.Errorf("failed to create jetstream context: %w", err)
 	}
 
-	return &Nats{
-		conn: nc,
-		js:   js,
-	}, nil
+	n := &Nats{
+		conn:           nc,
+		js:             js,
+		statusHandlers: make([]ConnectionStatusHandler, 0),
+	}
+
+	// Setup connection monitoring
+	setupConnectionHandlers(nc, n)
+
+	// Initial connection status
+	n.notifyStatusChange(Connected)
+
+	return n, nil
 }
 
 func (n *Nats) Subscribe(_ context.Context, topic string, handler func(payload []byte) error) (Subscription, error) {

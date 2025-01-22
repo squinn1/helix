@@ -46,11 +46,37 @@ func NewNatsController(ctx context.Context, config *NatsControllerConfig) (*Nats
 		serverURL: parsedURL.Scheme + "://" + parsedURL.Host,
 	}
 
-	// Subscribe to regular NATS messages
-	log.Debug().Str("runner_id", config.RunnerID).Str("queue", pubsub.GetRunnerQueue(config.RunnerID)).Msg("Subscribing to NATS queue")
-	subscription, err := config.PS.SubscribeWithCtx(ctx, pubsub.GetRunnerQueue(config.RunnerID), controller.handler)
-	if err != nil {
+	// Monitor connection status
+	config.PS.OnConnectionStatus(func(status pubsub.ConnectionStatus) {
+		switch status {
+		case pubsub.Connected:
+			log.Info().Str("runner_id", config.RunnerID).Msg("nats connection established")
+			// Resubscribe and announce connection
+			if err := controller.setupSubscription(ctx, config.RunnerID); err != nil {
+				log.Error().Err(err).Msg("failed to setup subscription after reconnect")
+			}
+		case pubsub.Disconnected:
+			log.Warn().Str("runner_id", config.RunnerID).Msg("nats connection lost")
+		case pubsub.Reconnecting:
+			log.Info().Str("runner_id", config.RunnerID).Msg("nats connection reconnecting")
+		}
+	})
+
+	// Initial subscription setup
+	if err := controller.setupSubscription(ctx, config.RunnerID); err != nil {
 		return nil, err
+	}
+
+	return controller, nil
+}
+
+// setupSubscription handles the subscription and connection announcement
+func (c *NatsController) setupSubscription(ctx context.Context, runnerID string) error {
+	log.Debug().Str("runner_id", runnerID).Str("queue", pubsub.GetRunnerQueue(runnerID)).Msg("subscribing to NATS queue")
+
+	subscription, err := c.pubsub.SubscribeWithCtx(ctx, pubsub.GetRunnerQueue(runnerID), c.handler)
+	if err != nil {
+		return fmt.Errorf("failed to subscribe: %w", err)
 	}
 
 	go func() {
@@ -58,15 +84,12 @@ func NewNatsController(ctx context.Context, config *NatsControllerConfig) (*Nats
 		subscription.Unsubscribe()
 	}()
 
-	log.Debug().Str("runner_id", config.RunnerID).Str("queue", pubsub.GetRunnerConnectedQueue(config.RunnerID)).Msg("Publishing to runner.connected queue")
-	err = config.PS.Publish(ctx, pubsub.GetRunnerConnectedQueue(config.RunnerID), []byte("connected"))
-	if err != nil {
-		return nil, err
+	log.Debug().Str("runner_id", runnerID).Str("queue", pubsub.GetRunnerConnectedQueue(runnerID)).Msg("publishing to runner.connected queue")
+	if err := c.pubsub.Publish(ctx, pubsub.GetRunnerConnectedQueue(runnerID), []byte("connected")); err != nil {
+		return fmt.Errorf("failed to publish connected message: %w", err)
 	}
 
-	// TODO(Phil): Also remember to register some way of detecting disconnection. It must reconnect.
-
-	return controller, nil
+	return nil
 }
 
 func (c *NatsController) handler(ctx context.Context, msg *nats.Msg) error {

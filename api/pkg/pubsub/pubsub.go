@@ -24,6 +24,7 @@ type PubSub interface {
 	QueueSubscribe(ctx context.Context, stream, sub string, handler func(msg *Message) error) (Subscription, error)
 	StreamRequest(ctx context.Context, stream, sub string, payload []byte, header map[string]string, timeout time.Duration) ([]byte, error)
 	StreamConsume(ctx context.Context, stream, sub string, handler func(msg *Message) error) (Subscription, error)
+	OnConnectionStatus(handler ConnectionStatusHandler)
 }
 
 type Message struct {
