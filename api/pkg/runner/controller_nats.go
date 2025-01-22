@@ -114,6 +114,7 @@ func (c *NatsController) handleStreamingRequest(ctx context.Context, msg *nats.M
 	// Create a buffered reader for the response
 	reader := bufio.NewReader(resp.Body)
 
+	log.Trace().Interface("header", msg.Header).Msg("starting to stream response")
 	// Stream the response chunks back
 	for {
 		select {
