@@ -33,10 +33,14 @@ type NatsController struct {
 }
 
 func NewNatsController(ctx context.Context, config *NatsControllerConfig) (*NatsController, error) {
+	if config == nil {
+		return nil, fmt.Errorf("config cannot be nil")
+	}
+
 	// Parse the server URL to make sure it's valid
 	parsedURL, err := url.Parse(config.ServerURL)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("invalid server URL: %w", err)
 	}
 
 	// Get the NATS connection from the pubsub interface
@@ -45,11 +49,21 @@ func NewNatsController(ctx context.Context, config *NatsControllerConfig) (*Nats
 		return nil, fmt.Errorf("pubsub must be a NATS implementation")
 	}
 
+	conn := natsPS.GetConnection()
+	if conn == nil {
+		return nil, fmt.Errorf("failed to get NATS connection")
+	}
+
+	js := natsPS.GetJetStream()
+	if js == nil {
+		return nil, fmt.Errorf("failed to get JetStream context")
+	}
+
 	controller := &NatsController{
 		pubsub:    config.PS,
 		serverURL: parsedURL.Scheme + "://" + parsedURL.Host,
-		js:        natsPS.GetJetStream(),
-		conn:      natsPS.GetConnection(),
+		js:        js,
+		conn:      conn,
 	}
 
 	// Create a valid stream name for this runner
