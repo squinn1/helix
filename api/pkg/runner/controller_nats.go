@@ -117,6 +117,8 @@ func NewNatsController(ctx context.Context, config *NatsControllerConfig) (*Nats
 				}
 			}
 		}()
+	} else {
+		log.Error().Err(err).Msg("error getting stream")
 	}
 
 	// Subscribe to regular NATS messages too
