@@ -4,15 +4,18 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/url"
+	"strings"
 
 	"bufio"
 
 	"github.com/helixml/helix/api/pkg/pubsub"
 	"github.com/helixml/helix/api/pkg/types"
 	"github.com/nats-io/nats.go"
+	"github.com/nats-io/nats.go/jetstream"
 	"github.com/rs/zerolog/log"
 )
 
@@ -25,6 +28,8 @@ type NatsControllerConfig struct {
 type NatsController struct {
 	pubsub    pubsub.PubSub
 	serverURL string
+	js        jetstream.JetStream
+	conn      *nats.Conn
 }
 
 func NewNatsController(ctx context.Context, config *NatsControllerConfig) (*NatsController, error) {
@@ -34,11 +39,71 @@ func NewNatsController(ctx context.Context, config *NatsControllerConfig) (*Nats
 		return nil, err
 	}
 
-	controller := &NatsController{
-		pubsub:    config.PS,
-		serverURL: parsedURL.Scheme + "://" + parsedURL.Host, // Just get the scheme and host
+	// Get the NATS connection from the pubsub interface
+	natsPS, ok := config.PS.(*pubsub.Nats)
+	if !ok {
+		return nil, fmt.Errorf("pubsub must be a NATS implementation")
 	}
 
+	controller := &NatsController{
+		pubsub:    config.PS,
+		serverURL: parsedURL.Scheme + "://" + parsedURL.Host,
+		js:        natsPS.GetJetStream(),
+		conn:      natsPS.GetConnection(),
+	}
+
+	// Create a valid stream name for this runner
+	streamName := fmt.Sprintf("STREAM_%s", strings.Map(func(r rune) rune {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '_' {
+			return r
+		}
+		return '_'
+	}, pubsub.GetRunnerQueue(config.RunnerID)))
+
+	// Create or update the consumer for this runner
+	stream, err := controller.js.Stream(ctx, streamName)
+	if err == nil {
+		// Stream exists, create or update consumer
+		consumer, err := stream.CreateOrUpdateConsumer(ctx, jetstream.ConsumerConfig{
+			Name:          fmt.Sprintf("CONSUMER_%s", config.RunnerID),
+			FilterSubject: pubsub.GetRunnerQueue(config.RunnerID),
+			AckPolicy:     jetstream.AckExplicitPolicy,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("failed to create consumer: %w", err)
+		}
+
+		// Start consuming messages
+		msgs, err := consumer.Messages()
+		if err != nil {
+			return nil, fmt.Errorf("failed to get message channel: %w", err)
+		}
+
+		go func() {
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				default:
+					msg, err := msgs.Next()
+					if err != nil {
+						log.Error().Err(err).Msg("error getting next message")
+						continue
+					}
+
+					// Handle the message
+					if err := controller.handleJetStreamMsg(ctx, msg); err != nil {
+						log.Error().Err(err).Msg("error handling jetstream message")
+						msg.Nak()
+						continue
+					}
+					msg.Ack()
+				}
+			}
+		}()
+	}
+
+	// Subscribe to regular NATS messages too
 	log.Debug().Str("runner_id", config.RunnerID).Str("queue", pubsub.GetRunnerQueue(config.RunnerID)).Msg("Subscribing to NATS queue")
 	subscription, err := config.PS.SubscribeWithCtx(ctx, pubsub.GetRunnerQueue(config.RunnerID), controller.handler)
 	if err != nil {
@@ -56,9 +121,19 @@ func NewNatsController(ctx context.Context, config *NatsControllerConfig) (*Nats
 		return nil, err
 	}
 
-	// TODO(Phil): Also remember to register some way of detecting disconnection. It must reconnect.
-
 	return controller, nil
+}
+
+func (c *NatsController) handleJetStreamMsg(ctx context.Context, msg jetstream.Msg) error {
+	// Convert JetStream message to regular NATS message for compatibility
+	natsMsg := &nats.Msg{
+		Subject: msg.Subject(),
+		Data:    msg.Data(),
+		Header:  msg.Headers(),
+	}
+
+	// Use the existing handler
+	return c.handler(ctx, natsMsg)
 }
 
 func (c *NatsController) handler(ctx context.Context, msg *nats.Msg) error {
@@ -71,6 +146,7 @@ func (c *NatsController) handler(ctx context.Context, msg *nats.Msg) error {
 
 	// Check if this is a streaming request
 	if msg.Header.Get(pubsub.StreamingHeader) == "true" {
+		log.Trace().Msg("handling streaming request")
 		return c.handleStreamingRequest(ctx, msg, &req)
 	}
 

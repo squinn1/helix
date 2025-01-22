@@ -549,3 +549,11 @@ func (n *Nats) StreamChatRespond(ctx context.Context, msg *Message, data []byte)
 	// Send the response chunk back through the reply subject
 	return n.conn.Publish(msg.Reply, data)
 }
+
+func (n *Nats) GetJetStream() jetstream.JetStream {
+	return n.js
+}
+
+func (n *Nats) GetConnection() *nats.Conn {
+	return n.conn
+}
