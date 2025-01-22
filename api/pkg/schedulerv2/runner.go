@@ -153,7 +153,7 @@ func (c *RunnerController) SubmitChatCompletionRequest(slot *scheduler.Slot, req
 	if err != nil {
 		return err
 	}
-	if resp.StatusCode != http.StatusCreated {
+	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("error submitting chat completion request: %s", resp.Body)
 	}
 

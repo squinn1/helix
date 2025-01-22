@@ -138,6 +138,8 @@ func (c *NatsController) executeTaskViaHTTP(ctx context.Context, headers nats.He
 						continue
 					}
 
+					log.Trace().Str("chunk", string(chunk)).Msg("received stream chunk, parsing")
+
 					// Remove the SSE data: prefix
 					chunk = bytes.TrimPrefix(chunk, []byte("data: "))
 
@@ -164,6 +166,8 @@ func (c *NatsController) executeTaskViaHTTP(ctx context.Context, headers nats.He
 						log.Error().Err(err).Msg("error marshalling response")
 						continue
 					}
+
+					log.Trace().Str("subject", replySubject).Str("response", string(respData)).Msg("publishing response")
 
 					// Publish to the responses queue
 					if err := c.pubsub.Publish(ctx, replySubject, respData); err != nil {
