@@ -179,8 +179,14 @@ func NewNatsClient(url string, token string) (*Nats, error) {
 		return nil, fmt.Errorf("failed to connect to nats: %w", err)
 	}
 
+	js, err := jetstream.New(nc)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create jetstream context: %w", err)
+	}
+
 	return &Nats{
 		conn: nc,
+		js:   js,
 	}, nil
 }
 
