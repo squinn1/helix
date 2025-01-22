@@ -74,13 +74,15 @@ func NewNatsController(ctx context.Context, config *NatsControllerConfig) (*Nats
 		return '_'
 	}, pubsub.GetRunnerQueue(config.RunnerID)))
 
+	log.Trace().Str("stream_name", streamName).Msg("creating stream")
+
 	// Create or update the consumer for this runner
 	stream, err := controller.js.Stream(ctx, streamName)
 	if err == nil {
 		// Stream exists, create or update consumer
 		consumer, err := stream.CreateOrUpdateConsumer(ctx, jetstream.ConsumerConfig{
 			Name:          fmt.Sprintf("CONSUMER_%s", config.RunnerID),
-			FilterSubject: pubsub.GetRunnerQueue(config.RunnerID),
+			FilterSubject: "*",
 			AckPolicy:     jetstream.AckExplicitPolicy,
 		})
 		if err != nil {
@@ -139,6 +141,7 @@ func NewNatsController(ctx context.Context, config *NatsControllerConfig) (*Nats
 }
 
 func (c *NatsController) handleJetStreamMsg(ctx context.Context, msg jetstream.Msg) error {
+	log.Trace().Str("stream_name", msg.Subject()).Msg("handling jetstream message")
 	// Convert JetStream message to regular NATS message for compatibility
 	natsMsg := &nats.Msg{
 		Subject: msg.Subject(),
