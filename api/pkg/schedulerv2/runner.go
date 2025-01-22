@@ -248,6 +248,7 @@ func (c *RunnerController) SubmitStreamingChatCompletionRequest(ctx context.Cont
 	}
 
 	// Use NATS streaming to send the request and get a response channel
+	log.Trace().Str("runner_id", slot.RunnerID).Str("request_id", req.RequestID).Msg("sending streaming request to runner")
 	responseCh, err := c.ps.StreamChatRequest(ctx, pubsub.GetRunnerQueue(slot.RunnerID), runnerRequest.URL, requestData, map[string]string{
 		"request_id":     req.RequestID,
 		"owner_id":       req.OwnerID,
@@ -278,6 +279,7 @@ func (c *RunnerController) SubmitStreamingChatCompletionRequest(ctx context.Cont
 				DurationMs:    time.Since(start).Milliseconds(),
 				Done:          streamResp.Choices[0].FinishReason != "",
 			}
+			log.Trace().Str("runner_id", slot.RunnerID).Str("request_id", req.RequestID).Str("interaction_id", req.InteractionID).Str("session_id", req.SessionID).Str("owner_id", req.OwnerID).Str("duration_ms", fmt.Sprintf("%d", resp.DurationMs)).Bool("done", resp.Done).Msg("received stream response")
 
 			// Convert stream response to regular response format
 			resp.Response = &openai.ChatCompletionResponse{

@@ -2,8 +2,10 @@ package pubsub
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -449,15 +451,31 @@ func (n *Nats) StreamChatRequest(ctx context.Context, stream, subject string, pa
 	replyInbox := nats.NewInbox()
 	dataCh := make(chan []byte)
 
+	// Create a context with timeout
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
+
 	// Subscribe to the reply inbox to receive streaming responses
 	sub, err := n.conn.Subscribe(replyInbox, func(msg *nats.Msg) {
 		select {
 		case <-ctx.Done():
 			return
 		case dataCh <- msg.Data:
+			// Check if this is a completion message
+			var streamResp struct {
+				Choices []struct {
+					FinishReason string `json:"finish_reason"`
+				} `json:"choices"`
+			}
+			if err := json.Unmarshal(msg.Data, &streamResp); err == nil {
+				if len(streamResp.Choices) > 0 && streamResp.Choices[0].FinishReason == "stop" {
+					cancel() // This will trigger cleanup
+					return
+				}
+			}
 		}
 	})
 	if err != nil {
+		cancel()
 		return nil, err
 	}
 
@@ -475,20 +493,44 @@ func (n *Nats) StreamChatRequest(ctx context.Context, stream, subject string, pa
 
 	hdr.Set(helixNatsReplyHeader, replyInbox)
 	hdr.Set(helixNatsSubjectHeader, subject)
-	hdr.Set(StreamingHeader, "true")
+	hdr.Set(helixNatsStreamingHeader, "true")
 
 	streamTopic := getStreamSub(stream, subject)
 
-	// Publish the request to the JetStream
+	// Create a valid stream name (only alphanumeric and underscores allowed)
+	streamName := fmt.Sprintf("STREAM_%s", strings.Map(func(r rune) rune {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '_' {
+			return r
+		}
+		return '_'
+	}, stream))
+
+	// Ensure the stream exists
+	_, err = n.js.CreateStream(ctx, jetstream.StreamConfig{
+		Name:      streamName,
+		Subjects:  []string{fmt.Sprintf("%s.>", stream)},
+		Retention: jetstream.WorkQueuePolicy,
+		MaxAge:    5 * time.Minute,
+	})
+	if err != nil && !strings.Contains(err.Error(), "stream name already in use") {
+		cancel()
+		sub.Unsubscribe()
+		close(dataCh)
+		return nil, fmt.Errorf("failed to create stream: %w", err)
+	}
+
+	log.Trace().Str("stream_name", streamName).Msg("publishing to stream")
+	// Publish the request to the JetStream with retry options
 	_, err = n.js.PublishMsg(ctx, &nats.Msg{
 		Subject: streamTopic,
 		Data:    payload,
 		Header:  hdr,
 	},
-		jetstream.WithRetryWait(50*time.Millisecond),
-		jetstream.WithRetryAttempts(10),
+		jetstream.WithRetryAttempts(5),
+		jetstream.WithRetryWait(100*time.Millisecond),
 	)
 	if err != nil {
+		cancel()
 		sub.Unsubscribe()
 		close(dataCh)
 		return nil, fmt.Errorf("failed to publish message to jetstream: %w", err)
@@ -503,6 +545,7 @@ func (n *Nats) StreamChatRespond(ctx context.Context, msg *Message, data []byte)
 		return fmt.Errorf("no reply subject in message")
 	}
 
+	log.Trace().Str("reply", msg.Reply).Msg("sending response")
 	// Send the response chunk back through the reply subject
 	return n.conn.Publish(msg.Reply, data)
 }

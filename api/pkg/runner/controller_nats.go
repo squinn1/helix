@@ -135,6 +135,7 @@ func (c *NatsController) handleStreamingRequest(ctx context.Context, msg *nats.M
 			}
 
 			// Send the chunk back through the reply subject
+			log.Trace().Interface("header", msg.Header).Msg("sending response")
 			if err := c.pubsub.StreamChatRespond(ctx, &pubsub.Message{
 				Reply:  msg.Header.Get(pubsub.HelixNatsReplyHeader),
 				Header: msg.Header,
