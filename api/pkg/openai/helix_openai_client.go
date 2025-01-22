@@ -95,6 +95,7 @@ func (c *InternalHelixServer) CreateChatCompletion(requestCtx context.Context, r
 			return fmt.Errorf("error unmarshalling runner response: %w", err)
 		}
 
+		log.Debug().Str("request_id", requestID).Msg("received runner response, closing channel")
 		defer close(doneCh)
 
 		if runnerResp.Response != nil {

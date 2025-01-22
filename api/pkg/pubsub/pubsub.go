@@ -23,6 +23,8 @@ type PubSub interface {
 	QueueSubscribe(ctx context.Context, stream, sub string, handler func(msg *Message) error) (Subscription, error)
 	StreamRequest(ctx context.Context, stream, sub string, payload []byte, header map[string]string, timeout time.Duration) ([]byte, error)
 	StreamConsume(ctx context.Context, stream, sub string, handler func(msg *Message) error) (Subscription, error)
+	StreamChatRequest(ctx context.Context, stream, subject string, payload []byte, header map[string]string) (<-chan []byte, error)
+	StreamChatRespond(ctx context.Context, msg *Message, data []byte) error
 }
 
 type Message struct {
@@ -74,9 +76,11 @@ func GetSessionQueue(ownerID, sessionID string) string {
 }
 
 const (
-	ScriptRunnerStream = "SCRIPTS"
-	AppQueue           = "apps"
-	RunnerQueue        = "runner"
+	ScriptRunnerStream   = "SCRIPTS"
+	AppQueue             = "apps"
+	RunnerQueue          = "runner"
+	HelixNatsReplyHeader = "helix-nats-reply"
+	StreamingHeader      = "streaming"
 )
 
 func getStreamSub(stream, sub string) string {

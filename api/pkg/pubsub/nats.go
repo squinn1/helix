@@ -15,8 +15,11 @@ import (
 )
 
 const (
-	scriptStreamName = "SCRIPTS_STREAM"
-	scriptsSubject   = "SCRIPTS.*"
+	scriptStreamName         = "SCRIPTS_STREAM"
+	scriptsSubject           = "SCRIPTS.*"
+	helixNatsReplyHeader     = "helix-reply"
+	helixNatsSubjectHeader   = "helix-subject"
+	helixNatsStreamingHeader = "streaming"
 )
 
 type Nats struct {
@@ -288,11 +291,6 @@ func (n *Nats) QueueSubscribe(_ context.Context, queue, subject string, handler 
 	return sub, nil
 }
 
-const (
-	helixNatsReplyHeader   = "helix-reply"
-	helixNatsSubjectHeader = "helix-subject"
-)
-
 // Request publish a message to the given subject and creates an inbox to receive the response. If response is not
 // received within the timeout, an error is returned.
 func (n *Nats) StreamRequest(ctx context.Context, stream, subject string, payload []byte, header map[string]string, timeout time.Duration) ([]byte, error) {
@@ -444,4 +442,67 @@ func gcJetStream(js jetstream.JetStream) {
 			}
 		}
 	}
+}
+
+// StreamChatRequest initiates a streaming chat request and returns a channel that receives responses
+func (n *Nats) StreamChatRequest(ctx context.Context, stream, subject string, payload []byte, header map[string]string) (<-chan []byte, error) {
+	replyInbox := nats.NewInbox()
+	dataCh := make(chan []byte)
+
+	// Subscribe to the reply inbox to receive streaming responses
+	sub, err := n.conn.Subscribe(replyInbox, func(msg *nats.Msg) {
+		select {
+		case <-ctx.Done():
+			return
+		case dataCh <- msg.Data:
+		}
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	// Clean up subscription when context is done
+	go func() {
+		<-ctx.Done()
+		sub.Unsubscribe()
+		close(dataCh)
+	}()
+
+	hdr := nats.Header{}
+	for k, v := range header {
+		hdr.Set(k, v)
+	}
+
+	hdr.Set(helixNatsReplyHeader, replyInbox)
+	hdr.Set(helixNatsSubjectHeader, subject)
+	hdr.Set(StreamingHeader, "true")
+
+	streamTopic := getStreamSub(stream, subject)
+
+	// Publish the request to the JetStream
+	_, err = n.js.PublishMsg(ctx, &nats.Msg{
+		Subject: streamTopic,
+		Data:    payload,
+		Header:  hdr,
+	},
+		jetstream.WithRetryWait(50*time.Millisecond),
+		jetstream.WithRetryAttempts(10),
+	)
+	if err != nil {
+		sub.Unsubscribe()
+		close(dataCh)
+		return nil, fmt.Errorf("failed to publish message to jetstream: %w", err)
+	}
+
+	return dataCh, nil
+}
+
+// StreamChatRespond sends a streaming response back to the requester
+func (n *Nats) StreamChatRespond(ctx context.Context, msg *Message, data []byte) error {
+	if msg.Reply == "" {
+		return fmt.Errorf("no reply subject in message")
+	}
+
+	// Send the response chunk back through the reply subject
+	return n.conn.Publish(msg.Reply, data)
 }

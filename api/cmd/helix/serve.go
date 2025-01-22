@@ -237,9 +237,10 @@ func serve(cmd *cobra.Command, cfg *config.ServerConfig) error {
 		return fmt.Errorf("unknown extractor: %s", cfg.TextExtractor.Provider)
 	}
 
-	var runnerController *controller.RunnerController
+	var runnerController *schedulerv2.RunnerController
+	var v2scheduler *schedulerv2.Scheduler
 	if cfg.EnableSchedulerV2 {
-		runnerController, err = controller.NewRunnerController(ctx, &controller.RunnerControllerConfig{
+		runnerController, err = schedulerv2.NewRunnerController(ctx, &schedulerv2.RunnerControllerConfig{
 			PubSub:  ps,
 			Context: ctx,
 		})
@@ -247,8 +248,15 @@ func serve(cmd *cobra.Command, cfg *config.ServerConfig) error {
 			return err
 		}
 
-		_, err = schedulerv2.NewScheduler(cfg, &schedulerv2.SchedulerParams{
+		v2scheduler, err = schedulerv2.NewScheduler(ctx, cfg, &schedulerv2.SchedulerParams{
 			RunnerController: runnerController,
+			QueueSize:        100,
+			OnSchedulingErr: func(work *scheduler.Workload, err error) {
+				log.Error().Err(err).Str("id", work.ID()).Msg("error scheduling work")
+			},
+			OnResponseHandler: func(ctx context.Context, resp *types.RunnerLLMInferenceResponse) error {
+				return nil
+			},
 		})
 		if err != nil {
 			return err
@@ -299,7 +307,7 @@ func serve(cmd *cobra.Command, cfg *config.ServerConfig) error {
 		}
 	})
 
-	helixInference := openai.NewInternalHelixServer(cfg, ps, scheduler)
+	helixInference := openai.NewInternalHelixServer(cfg, ps, scheduler, v2scheduler)
 
 	var logStores []logger.LogStore
 

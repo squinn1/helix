@@ -18,6 +18,7 @@ import (
 	"github.com/helixml/helix/api/pkg/pubsub"
 	"github.com/helixml/helix/api/pkg/rag"
 	"github.com/helixml/helix/api/pkg/scheduler"
+	"github.com/helixml/helix/api/pkg/schedulerv2"
 	"github.com/helixml/helix/api/pkg/store"
 	"github.com/helixml/helix/api/pkg/tools"
 	"github.com/helixml/helix/api/pkg/types"
@@ -39,7 +40,7 @@ type Options struct {
 	ProviderManager      manager.ProviderManager
 	DataprepOpenAIClient openai.Client
 	Scheduler            scheduler.Scheduler
-	RunnerController     *RunnerController
+	RunnerController     *schedulerv2.RunnerController
 }
 
 type Controller struct {
@@ -65,7 +66,7 @@ type Controller struct {
 	schedulingDecisions []*types.GlobalSchedulingDecision
 
 	scheduler        scheduler.Scheduler
-	runnerController *RunnerController
+	runnerController *schedulerv2.RunnerController
 }
 
 func NewController(

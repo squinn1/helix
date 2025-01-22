@@ -9,7 +9,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/helixml/helix/api/pkg/config"
-	"github.com/helixml/helix/api/pkg/controller"
 	"github.com/helixml/helix/api/pkg/model"
 	"github.com/helixml/helix/api/pkg/scheduler"
 	"github.com/helixml/helix/api/pkg/types"
@@ -19,7 +18,8 @@ import (
 )
 
 type Scheduler struct {
-	controller      *controller.RunnerController
+	ctx             context.Context
+	controller      *RunnerController
 	queue           []*scheduler.Workload
 	queueMtx        *sync.RWMutex
 	queueSize       int
@@ -30,12 +30,13 @@ type Scheduler struct {
 }
 
 type SchedulerParams struct {
-	RunnerController *controller.RunnerController
-	QueueSize        int
-	OnSchedulingErr  func(work *scheduler.Workload, err error)
+	RunnerController  *RunnerController
+	QueueSize         int
+	OnSchedulingErr   func(work *scheduler.Workload, err error)
+	OnResponseHandler func(ctx context.Context, resp *types.RunnerLLMInferenceResponse) error
 }
 
-func NewScheduler(serverConfig *config.ServerConfig, params *SchedulerParams) (*Scheduler, error) {
+func NewScheduler(ctx context.Context, serverConfig *config.ServerConfig, params *SchedulerParams) (*Scheduler, error) {
 	modelTTL := serverConfig.Providers.Helix.ModelTTL
 	if modelTTL == 0 {
 		modelTTL = 10 * time.Second
@@ -51,7 +52,8 @@ func NewScheduler(serverConfig *config.ServerConfig, params *SchedulerParams) (*
 
 	log.Info().Dur("model_stale_time", modelTTL).Dur("slot_timeout", slotTTL).Msg("slot timeouts")
 
-	return &Scheduler{
+	s := &Scheduler{
+		ctx:             ctx,
 		controller:      params.RunnerController,
 		queueSize:       queueSize,
 		queue:           make([]*scheduler.Workload, 0, queueSize),
@@ -60,7 +62,13 @@ func NewScheduler(serverConfig *config.ServerConfig, params *SchedulerParams) (*
 		slots:           xsync.NewMapOf[uuid.UUID, *scheduler.Slot](),
 		modelStaleFunc:  scheduler.NewTimeoutFunc(modelTTL),
 		slotTimeoutFunc: scheduler.NewTimeoutFunc(slotTTL),
-	}, nil
+	}
+
+	// Start the queue processor
+	log.Debug().Msg("starting queue processor")
+	go s.processQueue(ctx)
+
+	return s, nil
 }
 
 func (s *Scheduler) Enqueue(work *scheduler.Workload) error {
@@ -119,7 +127,7 @@ func (s *Scheduler) processQueueOnce() {
 
 	// Schedule any requests that are currently in the queue.
 	for _, work := range s.queue {
-		err := s.schedule(work)
+		err := s.start(work)
 		if err != nil {
 			retry, err := scheduler.ErrorHandlingStrategy(err, work)
 
@@ -138,7 +146,7 @@ func (s *Scheduler) processQueueOnce() {
 	s.queue = unscheduledQueue
 }
 
-func (s *Scheduler) schedule(work *scheduler.Workload) error {
+func (s *Scheduler) start(work *scheduler.Workload) error {
 	if work == nil {
 		return fmt.Errorf("workload is nil")
 	}
@@ -164,7 +172,6 @@ func (s *Scheduler) schedule(work *scheduler.Workload) error {
 		// Randomly select one warm slot from the available warm slots.
 		slot = slots[rand.Intn(len(slots))]
 
-		// Allocate work to the selected warm slot.
 		err := s.AllocateSlot(slot.ID, work)
 		if err != nil {
 			// Return error if unable to allocate work to the warm model.
@@ -175,7 +182,11 @@ func (s *Scheduler) schedule(work *scheduler.Workload) error {
 
 		// TODO(Phil): Implement strategy
 		// For now, pick a random runner
-		bestRunnerID := s.controller.RunnerIDs()[rand.Intn(len(s.controller.RunnerIDs()))]
+		allRunners := s.controller.RunnerIDs()
+		if len(allRunners) == 0 {
+			return fmt.Errorf("no runners available")
+		}
+		bestRunnerID := allRunners[rand.Intn(len(allRunners))]
 
 		// Figure out if we have to kill a slot to make room for the new one.
 		err := s.DeleteMostStaleStrategy(bestRunnerID, work.Model().GetMemoryRequirements(work.Mode()))
@@ -315,6 +326,27 @@ func (s *Scheduler) AllocateSlot(slotID uuid.UUID, req *scheduler.Workload) erro
 	// Schedule the slot.
 	slot.Schedule()
 
+	// Submit the work to the slot
+	slot.Start()
+	switch req.WorkloadType {
+	case scheduler.WorkloadTypeLLMInferenceRequest:
+		if req.LLMInferenceRequest().Request.Stream {
+			err := s.controller.SubmitStreamingChatCompletionRequest(s.ctx, slot, req.LLMInferenceRequest())
+			if err != nil {
+				log.Error().Err(err).Msg("error submitting streaming chat completion request")
+			}
+			// Don't release the slot here - it will be released when streaming is complete
+		} else {
+			err := s.controller.SubmitChatCompletionRequest(slot, req.LLMInferenceRequest())
+			if err != nil {
+				log.Error().Err(err).Msg("error submitting chat completion request")
+			}
+		}
+	case scheduler.WorkloadTypeSession:
+		panic("not implemented")
+	}
+	slot.Release()
+
 	return nil
 }
 
@@ -329,6 +361,11 @@ func (s *Scheduler) AllocateNewSlot(runnerID string, req *scheduler.Workload) (*
 		Uint64("total_memory", slot.Memory()).
 		Str("request_id", req.ID()).
 		Msg("creating new slot")
+
+	err := s.controller.CreateSlot(slot)
+	if err != nil {
+		return nil, err
+	}
 
 	// Ensure the slot is stored.
 	s.slots.Store(slot.ID, slot)
