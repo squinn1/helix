@@ -151,7 +151,7 @@ func (c *NatsController) executeTaskViaHTTP(ctx context.Context, headers nats.He
 					}
 
 					// Create a response object for each chunk
-					resp := &types.RunnerLLMInferenceResponse{
+					infResponse := &types.RunnerLLMInferenceResponse{
 						RequestID:      headers.Get(pubsub.RequestIDHeader),
 						OwnerID:        headers.Get(pubsub.OwnerIDHeader),
 						SessionID:      headers.Get(pubsub.SessionIDHeader),
@@ -162,7 +162,7 @@ func (c *NatsController) executeTaskViaHTTP(ctx context.Context, headers nats.He
 					}
 
 					// Marshal and publish the response
-					respData, err := json.Marshal(resp)
+					respData, err := json.Marshal(infResponse)
 					if err != nil {
 						log.Error().Err(err).Msg("error marshalling response")
 						continue
@@ -179,13 +179,36 @@ func (c *NatsController) executeTaskViaHTTP(ctx context.Context, headers nats.He
 		} else {
 			// Just respond to the reply location
 			body, _ := io.ReadAll(resp.Body)
-			log.Trace().Msg("sending response")
-			headerMap := map[string]string{}
-			for k, v := range headers {
-				headerMap[k] = v[0]
+			// Try to unmarshal the chunk into a ChatCompletionResponse
+			var chatResp openai.ChatCompletionResponse
+			if err := json.Unmarshal(body, &chatResp); err != nil {
+				log.Error().Err(err).Msg("error unmarshalling stream response")
+				return &types.Response{StatusCode: 500, Body: "Internal Error"}
 			}
-			err = c.pubsub.PublishWithHeader(ctx, headers.Get(pubsub.HelixNatsReplyHeader), headerMap, body)
+
+			// Create a response object for each chunk
+			infResponse := &types.RunnerLLMInferenceResponse{
+				RequestID:     headers.Get(pubsub.RequestIDHeader),
+				OwnerID:       headers.Get(pubsub.OwnerIDHeader),
+				SessionID:     headers.Get(pubsub.SessionIDHeader),
+				InteractionID: headers.Get(pubsub.InteractionIDHeader),
+				DurationMs:    time.Since(start).Milliseconds(),
+				Done:          chatResp.Choices[0].FinishReason != "",
+				Response:      &chatResp,
+			}
+
+			// Marshal and publish the response
+			respData, err := json.Marshal(infResponse)
 			if err != nil {
+				log.Error().Err(err).Msg("error marshalling response")
+				return &types.Response{StatusCode: 500, Body: "Internal Error"}
+			}
+
+			log.Trace().Str("subject", replySubject).Str("response", string(respData)).Msg("publishing response")
+
+			// Publish to the responses queue
+			if err := c.pubsub.Publish(ctx, replySubject, respData); err != nil {
+				log.Error().Err(err).Msg("error publishing response")
 				return &types.Response{StatusCode: 500, Body: "Internal Error"}
 			}
 			return &types.Response{
