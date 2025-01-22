@@ -152,12 +152,13 @@ func (c *NatsController) executeTaskViaHTTP(ctx context.Context, headers nats.He
 
 					// Create a response object for each chunk
 					resp := &types.RunnerLLMInferenceResponse{
-						RequestID:     headers.Get(pubsub.RequestIDHeader),
-						OwnerID:       headers.Get(pubsub.OwnerIDHeader),
-						SessionID:     headers.Get(pubsub.SessionIDHeader),
-						InteractionID: headers.Get(pubsub.InteractionIDHeader),
-						DurationMs:    time.Since(start).Milliseconds(),
-						Done:          streamResp.Choices[0].FinishReason != "",
+						RequestID:      headers.Get(pubsub.RequestIDHeader),
+						OwnerID:        headers.Get(pubsub.OwnerIDHeader),
+						SessionID:      headers.Get(pubsub.SessionIDHeader),
+						InteractionID:  headers.Get(pubsub.InteractionIDHeader),
+						DurationMs:     time.Since(start).Milliseconds(),
+						Done:           streamResp.Choices[0].FinishReason != "",
+						StreamResponse: &streamResp,
 					}
 
 					// Marshal and publish the response
