@@ -137,9 +137,7 @@ func (c *RunnerController) SubmitChatCompletionRequest(slot *scheduler.Slot, req
 	headers[pubsub.OwnerIDHeader] = req.OwnerID
 	headers[pubsub.SessionIDHeader] = req.SessionID
 	headers[pubsub.InteractionIDHeader] = req.InteractionID
-	if req.Request.Stream {
-		headers[pubsub.HelixNatsReplyHeader] = pubsub.GetRunnerResponsesQueue(req.OwnerID, req.RequestID)
-	}
+	headers[pubsub.HelixNatsReplyHeader] = pubsub.GetRunnerResponsesQueue(req.OwnerID, req.RequestID)
 
 	body, err := json.Marshal(req.Request)
 	if err != nil {
