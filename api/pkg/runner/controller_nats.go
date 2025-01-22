@@ -96,9 +96,24 @@ func (c *NatsController) executeTaskViaHTTP(ctx context.Context, headers nats.He
 	}
 
 	start := time.Now()
-	req, err := http.NewRequest(task.Method, c.serverURL+parsedURL.Path, bytes.NewBuffer([]byte(task.Body)))
-	if err != nil {
-		return &types.Response{StatusCode: 500, Body: "Internal Error"}
+	var req *http.Request
+	var replySubject string
+	if headers.Get(pubsub.BodyTypeHeader) == pubsub.BodyTypeLLMInferenceRequest {
+		var llmReq types.RunnerLLMInferenceRequest
+		if err := json.Unmarshal([]byte(task.Body), &llmReq); err != nil {
+			return &types.Response{StatusCode: 400, Body: "Unable to parse request body"}
+		}
+		var newBody bytes.Buffer
+		json.NewEncoder(&newBody).Encode(llmReq.Request)
+		req, err = http.NewRequest(task.Method, c.serverURL+parsedURL.Path, &newBody)
+		if err != nil {
+			return &types.Response{StatusCode: 500, Body: "Internal Error"}
+		}
+	} else {
+		req, err = http.NewRequest(task.Method, c.serverURL+parsedURL.Path, bytes.NewBuffer([]byte(task.Body)))
+		if err != nil {
+			return &types.Response{StatusCode: 500, Body: "Internal Error"}
+		}
 	}
 
 	client := &http.Client{}
@@ -108,9 +123,7 @@ func (c *NatsController) executeTaskViaHTTP(ctx context.Context, headers nats.He
 	}
 	defer resp.Body.Close()
 
-	// If the request has a reply header, we need to send the response there
-	replySubject := headers.Get(pubsub.HelixNatsReplyHeader)
-	if replySubject != "" {
+	if headers.Get(pubsub.BodyTypeHeader) == pubsub.BodyTypeLLMInferenceRequest {
 		// Check if this response is a streaming response
 		contentType := resp.Header.Get("Content-Type")
 		if strings.Contains(contentType, "text/event-stream") {

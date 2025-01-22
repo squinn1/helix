@@ -133,13 +133,9 @@ func (c *RunnerController) Slots(runnerID string) ([]types.RunnerSlot, error) {
 
 func (c *RunnerController) SubmitChatCompletionRequest(slot *scheduler.Slot, req *types.RunnerLLMInferenceRequest) error {
 	headers := map[string]string{}
-	headers[pubsub.RequestIDHeader] = req.RequestID
-	headers[pubsub.OwnerIDHeader] = req.OwnerID
-	headers[pubsub.SessionIDHeader] = req.SessionID
-	headers[pubsub.InteractionIDHeader] = req.InteractionID
-	headers[pubsub.HelixNatsReplyHeader] = pubsub.GetRunnerResponsesQueue(req.OwnerID, req.RequestID)
+	headers[pubsub.BodyTypeHeader] = pubsub.BodyTypeLLMInferenceRequest
 
-	body, err := json.Marshal(req.Request)
+	body, err := json.Marshal(req)
 	if err != nil {
 		return err
 	}
