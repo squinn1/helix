@@ -62,8 +62,9 @@ func NewDiffusersRuntime(ctx context.Context, params DiffusersRuntimeParams) (*D
 		log.Debug().Int("port", *params.Port).Msg("Found free port")
 	}
 	return &DiffusersRuntime{
-		cacheDir: *params.CacheDir,
-		port:     *params.Port,
+		cacheDir:     *params.CacheDir,
+		port:         *params.Port,
+		startTimeout: *params.StartTimeout,
 	}, nil
 }
 
@@ -101,7 +102,7 @@ func (d *DiffusersRuntime) Start(ctx context.Context) error {
 	// Start ollama cmd
 	cmd, err := startDiffusersCmd(ctx, diffusersCommander, d.port, d.cacheDir)
 	if err != nil {
-		return fmt.Errorf("error building ollama cmd: %w", err)
+		return fmt.Errorf("error building diffusers cmd: %w", err)
 	}
 	d.cmd = cmd
 
@@ -116,12 +117,12 @@ func (d *DiffusersRuntime) Start(ctx context.Context) error {
 	}
 
 	// Wait for diffusers to be ready
-	log.Debug().Str("url", url.String()).Dur("timeout", d.startTimeout).Msg("Waiting for Ollama to start")
+	log.Debug().Str("url", url.String()).Dur("timeout", d.startTimeout).Msg("Waiting for diffusers to start")
 	err = d.waitUntilDiffusersIsReady(ctx)
 	if err != nil {
-		return fmt.Errorf("error waiting for Ollama to start: %s", err.Error())
+		return fmt.Errorf("error waiting for diffusers to start: %s", err.Error())
 	}
-	log.Info().Msg("Ollama has started")
+	log.Info().Msg("diffusers has started")
 
 	// Set the version
 	version, err := d.DiffusersClient.Version(ctx)
