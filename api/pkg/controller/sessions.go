@@ -864,9 +864,16 @@ func (c *Controller) AddSessionToQueue(session *types.Session) error {
 	if err != nil {
 		return fmt.Errorf("error creating workload: %w", err)
 	}
-	err = c.scheduler.Enqueue(work)
-	if err != nil {
-		return fmt.Errorf("error enqueuing work: %w", err)
+	if c.schedulerV2 != nil {
+		err = c.schedulerV2.Enqueue(work)
+		if err != nil {
+			return fmt.Errorf("error enqueuing work: %w", err)
+		}
+	} else {
+		err = c.scheduler.Enqueue(work)
+		if err != nil {
+			return fmt.Errorf("error enqueuing work: %w", err)
+		}
 	}
 	return nil
 }

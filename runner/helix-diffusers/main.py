@@ -24,7 +24,6 @@ logger = logging.getLogger(__name__)
 server_host = os.getenv("SERVER_HOST", "0.0.0.0")
 server_port = int(os.getenv("SERVER_PORT", 8000))
 server_url = f"http://{server_host}:{server_port}"
-model_id = os.getenv("MODEL_ID", "stabilityai/sd-turbo")
 cache_dir = os.getenv("CACHE_DIR", "/root/.cache/huggingface/hub")
 
 # Check that the cache dir exists
@@ -93,9 +92,8 @@ class TextToImagePipeline:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    shared_pipeline.start(model_id)
     yield
-
+    shared_pipeline.stop()
 
 app = FastAPI(lifespan=lifespan)
 image_dir = os.path.join(tempfile.gettempdir(), "images")
@@ -180,6 +178,15 @@ async def list_models():
     
     # Convert to ListModelsResponse
     return ListModelsResponse(models=[Model(CreatedAt=0, ID=model, Object="model", OwnedBy="helix", Permission=[], Root="", Parent="") for model in models])
+
+
+class WarmRequest(BaseModel):
+    model: str
+
+@app.post("/warm")
+async def warm(warm_request: WarmRequest):
+    shared_pipeline.start(warm_request.model)
+    return {"status": "ok"}
 
 @app.post("/v1/images/generations")
 async def generate_image(image_input: TextToImageInput):

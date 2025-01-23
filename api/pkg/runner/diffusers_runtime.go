@@ -160,11 +160,7 @@ func (d *DiffusersRuntime) PullModel(ctx context.Context, modelName string, pull
 }
 
 func (d *DiffusersRuntime) Warm(ctx context.Context, modelName string) error {
-	_, err := d.OpenAIClient().CreateImage(ctx, openai.ImageRequest{
-		Model:  modelName,
-		Prompt: "hello",
-	})
-	return err
+	return d.DiffusersClient.Warm(ctx, modelName)
 }
 
 func (d *DiffusersRuntime) OpenAIClient() *openai.Client {
@@ -185,9 +181,9 @@ func startDiffusersCmd(ctx context.Context, commander Commander, port int, cache
 	if err != nil {
 		return nil, fmt.Errorf("uv not found in PATH")
 	}
-	log.Debug().Str("uv_path", uvPath).Msg("Found uv")
+	log.Trace().Str("uv_path", uvPath).Msg("Found uv")
 
-	log.Debug().Msg("Preparing Diffusers command")
+	log.Trace().Msg("Preparing Diffusers command")
 	var cmd *exec.Cmd
 	if filter.Mode == types.SessionModeInference {
 		cmd = exec.CommandContext(
@@ -213,10 +209,10 @@ func startDiffusersCmd(ctx context.Context, commander Commander, port int, cache
 		// Set python to be unbuffered so we get logs in real time
 		"PYTHONUNBUFFERED=1",
 	)
-	log.Debug().Interface("env", cmd.Env).Msg("Diffusers serve command")
+	log.Trace().Interface("env", cmd.Env).Msg("Diffusers serve command")
 
 	// Prepare stdout and stderr
-	log.Debug().Msg("Preparing stdout and stderr")
+	log.Trace().Msg("Preparing stdout and stderr")
 	cmd.Stdout = os.Stdout
 	// this buffer is so we can keep the last 10kb of stderr so if
 	// there is an error we can send it to the api
@@ -235,7 +231,7 @@ func startDiffusersCmd(ctx context.Context, commander Commander, port int, cache
 
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 
-	log.Debug().Msg("Starting Diffusers")
+	log.Trace().Msg("Starting Diffusers")
 	if err := cmd.Start(); err != nil {
 		return nil, fmt.Errorf("error starting Diffusers: %w", err)
 	}
@@ -351,6 +347,32 @@ func (d *DiffusersClient) Pull(ctx context.Context, modelName string) error {
 	}
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("diffusers pull returned status %d", resp.StatusCode)
+	}
+	return nil
+}
+
+type DiffusersWarmRequest struct {
+	Model string `json:"model"`
+}
+
+func (d *DiffusersClient) Warm(ctx context.Context, modelName string) error {
+	warmReq := DiffusersWarmRequest{
+		Model: modelName,
+	}
+	body, err := json.Marshal(warmReq)
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequestWithContext(ctx, "POST", "/warm", bytes.NewBuffer(body))
+	if err != nil {
+		return err
+	}
+	resp, err := d.client.Do(req)
+	if err != nil {
+		return err
+	}
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("diffusers warm returned status %d", resp.StatusCode)
 	}
 	return nil
 }

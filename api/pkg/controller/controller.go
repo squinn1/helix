@@ -41,6 +41,7 @@ type Options struct {
 	DataprepOpenAIClient openai.Client
 	Scheduler            scheduler.Scheduler
 	RunnerController     *schedulerv2.RunnerController
+	SchedulerV2          *schedulerv2.Scheduler
 }
 
 type Controller struct {
@@ -66,6 +67,7 @@ type Controller struct {
 	schedulingDecisions []*types.GlobalSchedulingDecision
 
 	scheduler        scheduler.Scheduler
+	schedulerV2      *schedulerv2.Scheduler
 	runnerController *schedulerv2.RunnerController
 }
 
@@ -106,7 +108,7 @@ func NewController(
 		activeRunners:       xsync.NewMapOf[string, *types.RunnerState](),
 		schedulingDecisions: []*types.GlobalSchedulingDecision{},
 		scheduler:           options.Scheduler,
-		runnerController:    options.RunnerController,
+		schedulerV2:         options.SchedulerV2,
 	}
 
 	toolsOpenAIClient, err := controller.getClient(ctx, options.Config.Inference.Provider)

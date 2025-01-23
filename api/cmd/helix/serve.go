@@ -364,6 +364,7 @@ func serve(cmd *cobra.Command, cfg *config.ServerConfig) error {
 		ProviderManager:      providerManager,
 		DataprepOpenAIClient: dataprepOpenAIClient,
 		Scheduler:            scheduler,
+		SchedulerV2:          v2scheduler,
 		RunnerController:     runnerController,
 	}
 

@@ -180,6 +180,7 @@ func (s *Scheduler) start(work *scheduler.Workload) error {
 	} else {
 		// If no warm slots are available, pick a runner to allocate a slot to.
 
+		// TODO(Phil): Test to see if the model can fit in ANY runner
 		// TODO(Phil): Implement strategy
 		// For now, pick a random runner
 		allRunners := s.controller.RunnerIDs()
@@ -187,8 +188,10 @@ func (s *Scheduler) start(work *scheduler.Workload) error {
 			return fmt.Errorf("no runners available")
 		}
 		bestRunnerID := allRunners[rand.Intn(len(allRunners))]
+		log.Trace().Str("runner_id", bestRunnerID).Msg("chosen best runner")
 
 		// Figure out if we have to kill a slot to make room for the new one.
+		log.Trace().Str("runner_id", bestRunnerID).Uint64("memory_required", work.Model().GetMemoryRequirements(work.Mode())).Msg("deleting stale slots")
 		err := s.DeleteMostStaleStrategy(bestRunnerID, work.Model().GetMemoryRequirements(work.Mode()))
 		if err != nil {
 			return fmt.Errorf("unable to delete stale slots: %w", err)
