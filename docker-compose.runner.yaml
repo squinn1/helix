@@ -7,6 +7,9 @@ services:
     network_mode: "host" # So the runner can access the control plane that is running on the host
     volumes:
       - ~/.cache/huggingface:/root/.cache/huggingface
+    ports:
+      - ${SERVER_PORT}:${SERVER_PORT}
+      - 4222:4222
     environment:
       - LOG_LEVEL=${LOG_LEVEL-info}
       - RUNNER_ID=${RUNNER_ID-local-dev-runner}
