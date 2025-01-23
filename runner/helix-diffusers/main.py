@@ -173,7 +173,7 @@ class ListModelsResponse(BaseModel):
     models: List[Model]
 
 
-@app.get("/models", response_model=ListModelsResponse)
+@app.get("/v1/models", response_model=ListModelsResponse)
 async def list_models():
     # Read all of the models in the cache dir
     models = os.listdir(cache_dir)
