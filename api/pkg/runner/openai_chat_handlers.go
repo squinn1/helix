@@ -57,7 +57,7 @@ func (s *HelixRunnerAPIServer) createChatCompletion(rw http.ResponseWriter, r *h
 		return
 	}
 
-	ownerID := s.cfg.ID
+	ownerID := s.runnerOptions.ID
 	user := getRequestUser(r)
 	if user != nil {
 		ownerID = user.ID
@@ -82,7 +82,7 @@ func (s *HelixRunnerAPIServer) createChatCompletion(rw http.ResponseWriter, r *h
 	// Non-streaming request returns the response immediately
 	if !chatCompletionRequest.Stream {
 		log.Trace().Str("model", slot.Model).Msg("creating chat completion")
-		resp, err := slot.Runtime.OpenAIClient.CreateChatCompletion(ctx, chatCompletionRequest)
+		resp, err := slot.Runtime.OpenAIClient().CreateChatCompletion(ctx, chatCompletionRequest)
 		if err != nil {
 			log.Error().Err(err).Msg("error creating chat completion")
 			http.Error(rw, err.Error(), http.StatusInternalServerError)
@@ -112,7 +112,7 @@ func (s *HelixRunnerAPIServer) createChatCompletion(rw http.ResponseWriter, r *h
 	}
 
 	// Streaming request, receive and write the stream in chunks
-	stream, err := slot.Runtime.OpenAIClient.CreateChatCompletionStream(ctx, chatCompletionRequest)
+	stream, err := slot.Runtime.OpenAIClient().CreateChatCompletionStream(ctx, chatCompletionRequest)
 	if err != nil {
 		http.Error(rw, err.Error(), http.StatusInternalServerError)
 		return

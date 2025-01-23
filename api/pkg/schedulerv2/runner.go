@@ -158,7 +158,7 @@ func (c *RunnerController) CreateSlot(slot *scheduler.Slot) error {
 	req := &types.CreateRunnerSlotRequest{
 		ID: slot.ID,
 		Attributes: types.CreateRunnerSlotAttributes{
-			Runtime: "ollama", // TODO(phil): make this configurable
+			Runtime: slot.Runtime(),
 			Model:   slot.ModelName().String(),
 		},
 	}

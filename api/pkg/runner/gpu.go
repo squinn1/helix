@@ -14,11 +14,14 @@ import (
 // GPU is a collection of functions that help with GPU management
 
 type GPUManager struct {
-	hasGPU bool
+	hasGPU        bool
+	runnerOptions *Options
 }
 
-func NewGPUManager() *GPUManager {
-	g := &GPUManager{}
+func NewGPUManager(runnerOptions *Options) *GPUManager {
+	g := &GPUManager{
+		runnerOptions: runnerOptions,
+	}
 	g.hasGPU = g.detectGPU()
 	return g
 }
@@ -83,6 +86,11 @@ func (g *GPUManager) GetFreeMemory() int64 {
 }
 
 func (g *GPUManager) GetTotalMemory() uint64 {
+	// If the user has manually set the total memory, then use that
+	if g.runnerOptions.MemoryBytes > 0 {
+		return g.runnerOptions.MemoryBytes
+	}
+
 	if !g.hasGPU {
 		return 0
 	}

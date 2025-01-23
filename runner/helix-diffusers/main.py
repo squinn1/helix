@@ -14,6 +14,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
+from huggingface_hub import snapshot_download
 
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
@@ -127,6 +128,58 @@ def save_image(image):
 async def base():
     return {"status": "ok"}
 
+@app.get("/version")
+async def version():
+    return {"version": diffusers.__version__}
+
+class PullRequest(BaseModel):
+    model: str
+
+@app.post("/pull")
+async def pull(pull_request: PullRequest):
+    download_model(pull_request.model, cache_dir)
+    return {"status": "ok"}
+
+
+def download_model(model_name: str, save_path: str):
+    """
+    Download model weights from Hugging Face Hub
+    
+    Args:
+        model_name (str): Name of the model on Hugging Face Hub
+        save_path (str): Local directory path to save the model
+        pipeline_type (str): Type of pipeline to use ('sd' for StableDiffusion or 'flux' for Flux)
+    """
+    print(f"Downloading model: {model_name}")
+    
+    # Download all model files directly without pipeline initialization
+    snapshot_download(
+        repo_id=model_name,
+        cache_dir=save_path,
+    )
+
+    # Check the location of the downloaded models
+    print(f"Model successfully downloaded to: {save_path}")
+
+class ListModelsResponse(BaseModel):
+    models: List[Model]
+
+class Model(BaseModel):
+    CreatedAt: int64
+    ID: str
+    Object: str
+    OwnedBy: str
+    Permission: List[str]
+    Root: str
+    Parent: str
+
+@app.get("/models", response_model=ListModelsResponse)
+async def list_models():
+    # Read all of the models in the cache dir
+    models = os.listdir(cache_dir)
+    
+    # Convert to ListModelsResponse
+    return ListModelsResponse(models=[Model(CreatedAt=0, ID=model, Object="model", OwnedBy="helix", Permission=[], Root="", Parent="") for model in models])
 
 @app.post("/v1/images/generations")
 async def generate_image(image_input: TextToImageInput):

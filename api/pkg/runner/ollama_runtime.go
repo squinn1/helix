@@ -21,13 +21,12 @@ import (
 )
 
 var (
-	ollamaCommander Commander     = &RealCommander{}
+	ollamaCommander Commander = &RealCommander{}
 )
 
 type OllamaRuntime struct {
-	Runtime      types.Runtime
-	Version      string
-	OpenAIClient *openai.Client
+	version      string
+	openAIClient *openai.Client
 	cacheDir     string
 	port         int
 	startTimeout time.Duration
@@ -81,8 +80,7 @@ func NewOllamaRuntime(ctx context.Context, params OllamaRuntimeParams) (*OllamaR
 	}
 
 	return &OllamaRuntime{
-		Runtime:      types.RuntimeOllama,
-		Version:      "unknown",
+		version:      "unknown",
 		cacheDir:     *params.CacheDir,
 		port:         *params.Port,
 		startTimeout: *params.StartTimeout,
@@ -149,10 +147,10 @@ func (i *OllamaRuntime) Start(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("error getting ollama info: %w", err)
 	}
-	i.Version = version
+	i.version = version
 
 	// Create the openai client
-	i.OpenAIClient, err = CreateOpenaiClient(ctx, fmt.Sprintf("http://localhost:%d/v1", i.port))
+	i.openAIClient, err = CreateOpenaiClient(ctx, fmt.Sprintf("http://localhost:%d/v1", i.port))
 	if err != nil {
 		return fmt.Errorf("error creating openai client: %w", err)
 	}
@@ -202,34 +200,6 @@ func (i *OllamaRuntime) PullModel(ctx context.Context, modelName string, pullPro
 	return nil
 }
 
-func (i *OllamaRuntime) ListModels(ctx context.Context) ([]Model, error) {
-	if i.ollamaClient == nil {
-		return nil, fmt.Errorf("ollama client not initialized")
-	}
-	models, err := i.ollamaClient.List(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("error listing models: %w", err)
-	}
-	log.Debug().Interface("models", models).Msg("models")
-
-	modelList := []Model{}
-	for _, model := range models.Models {
-		modelList = append(modelList, Model{
-			Name:              model.Model,
-			ModifiedAt:        model.ModifiedAt,
-			Size:              model.Size,
-			Digest:            model.Digest,
-			ParentModel:       model.Details.ParentModel,
-			Format:            model.Details.Format,
-			Family:            model.Details.Family,
-			Families:          model.Details.Families,
-			ParameterSize:     model.Details.ParameterSize,
-			QuantizationLevel: model.Details.QuantizationLevel,
-		})
-	}
-	return modelList, nil
-}
-
 func (i *OllamaRuntime) Warm(ctx context.Context, model string) error {
 	err := i.ollamaClient.Chat(ctx, &api.ChatRequest{
 		Model: model,
@@ -251,6 +221,18 @@ func (i *OllamaRuntime) Warm(ctx context.Context, model string) error {
 		}
 	}
 	return err
+}
+
+func (i *OllamaRuntime) OpenAIClient() *openai.Client {
+	return i.openAIClient
+}
+
+func (i *OllamaRuntime) Runtime() types.Runtime {
+	return types.RuntimeOllama
+}
+
+func (i *OllamaRuntime) Version() string {
+	return i.version
 }
 
 func (i *OllamaRuntime) waitUntilOllamaIsReady(ctx context.Context, startTimeout time.Duration) error {

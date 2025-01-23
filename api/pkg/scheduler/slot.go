@@ -153,3 +153,10 @@ func (s *Slot) IsNew() bool {
 
 	return s.isNew
 }
+
+func (s *Slot) Runtime() types.Runtime {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	return s.work.Runtime()
+}

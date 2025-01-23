@@ -37,7 +37,7 @@ func (s *HelixRunnerAPIServer) listModels(rw http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	resp, err := slot.Runtime.OpenAIClient.ListModels(r.Context())
+	resp, err := slot.Runtime.OpenAIClient().ListModels(r.Context())
 	if err != nil {
 		http.Error(rw, err.Error(), http.StatusInternalServerError)
 		return

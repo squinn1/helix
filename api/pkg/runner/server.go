@@ -26,42 +26,33 @@ var (
 	startTime = time.Now()
 )
 
-type RunnerServerOptions struct {
-	ID         string
-	Host       string
-	Port       int
-	CLIContext context.Context
-	Labels     map[string]string
-}
-
 type HelixRunnerAPIServer struct {
-	cfg        *RunnerServerOptions
-	slots      map[uuid.UUID]*Slot
-	cliContext context.Context
-	gpuManager *GPUManager
-	labels     map[string]string
+	runnerOptions *Options
+	cliContext    context.Context
+	slots         map[uuid.UUID]*Slot
+	gpuManager    *GPUManager
 }
 
 func NewHelixRunnerAPIServer(
-	cfg *RunnerServerOptions,
+	ctx context.Context,
+	runnerOptions *Options,
 ) (*HelixRunnerAPIServer, error) {
-	if cfg.CLIContext == nil {
+	if ctx == nil {
 		return nil, fmt.Errorf("cli context is required")
 	}
-	if cfg.Host == "" {
-		cfg.Host = "127.0.0.1"
+	if runnerOptions.WebServer.Host == "" {
+		runnerOptions.WebServer.Host = "127.0.0.1"
 	}
 
-	if cfg.Port == 0 {
-		cfg.Port = 8080
+	if runnerOptions.WebServer.Port == 0 {
+		runnerOptions.WebServer.Port = 8080
 	}
 
 	return &HelixRunnerAPIServer{
-		cfg:        cfg,
-		slots:      make(map[uuid.UUID]*Slot),
-		cliContext: cfg.CLIContext,
-		gpuManager: NewGPUManager(),
-		labels:     cfg.Labels,
+		runnerOptions: runnerOptions,
+		slots:         make(map[uuid.UUID]*Slot),
+		cliContext:    ctx,
+		gpuManager:    NewGPUManager(runnerOptions),
 	}, nil
 }
 
@@ -72,7 +63,7 @@ func (apiServer *HelixRunnerAPIServer) ListenAndServe(ctx context.Context, _ *sy
 	}
 
 	srv := &http.Server{
-		Addr:              fmt.Sprintf("%s:%d", apiServer.cfg.Host, apiServer.cfg.Port),
+		Addr:              fmt.Sprintf("%s:%d", apiServer.runnerOptions.WebServer.Host, apiServer.runnerOptions.WebServer.Port),
 		WriteTimeout:      time.Minute * 15,
 		ReadTimeout:       time.Minute * 15,
 		ReadHeaderTimeout: time.Minute * 15,
@@ -99,6 +90,7 @@ func (apiServer *HelixRunnerAPIServer) registerRoutes(_ context.Context) (*mux.R
 	subRouter.HandleFunc("/slots/{slot_id}/v1/chat/completions", apiServer.createChatCompletion).Methods(http.MethodPost, http.MethodOptions)
 	subRouter.HandleFunc("/slots/{slot_id}/v1/models", apiServer.listModels).Methods(http.MethodGet, http.MethodOptions)
 	subRouter.HandleFunc("/slots/{slot_id}/v1/embedding", apiServer.createEmbedding).Methods(http.MethodPost, http.MethodOptions)
+	subRouter.HandleFunc("/slots/{slot_id}/v1/images/generations", apiServer.createImageGeneration).Methods(http.MethodPost, http.MethodOptions)
 
 	// register pprof routes
 	router.PathPrefix("/debug/pprof/").Handler(http.DefaultServeMux)
@@ -113,13 +105,13 @@ func (apiServer *HelixRunnerAPIServer) healthz(w http.ResponseWriter, r *http.Re
 
 func (apiServer *HelixRunnerAPIServer) status(w http.ResponseWriter, r *http.Request) {
 	status := &types.RunnerStatus{
-		ID:          apiServer.cfg.ID,
+		ID:          apiServer.runnerOptions.ID,
 		Created:     startTime,
 		Updated:     time.Now(),
 		Version:     data.GetHelixVersion(),
 		TotalMemory: apiServer.gpuManager.GetTotalMemory(),
 		FreeMemory:  apiServer.gpuManager.GetFreeMemory(),
-		Labels:      apiServer.cfg.Labels,
+		Labels:      apiServer.runnerOptions.Labels,
 	}
 	json.NewEncoder(w).Encode(status)
 }
@@ -146,7 +138,7 @@ func (apiServer *HelixRunnerAPIServer) createSlot(w http.ResponseWriter, r *http
 
 	// Must pass the context from the cli to ensure that the underlying runtime continues to run so
 	// long as the cli is running
-	s, err := CreateSlot(apiServer.cliContext, slot.ID, apiServer.cfg.ID, slot.Attributes.Runtime, slot.Attributes.Model)
+	s, err := CreateSlot(apiServer.cliContext, slot.ID, apiServer.runnerOptions.ID, slot.Attributes.Runtime, slot.Attributes.Model)
 	if err != nil {
 		if strings.Contains(err.Error(), "pull model manifest: file does not exist") {
 			http.Error(w, err.Error(), http.StatusNotFound)
@@ -166,8 +158,8 @@ func (apiServer *HelixRunnerAPIServer) listSlots(w http.ResponseWriter, r *http.
 	for id, slot := range apiServer.slots {
 		slotList = append(slotList, types.RunnerSlot{
 			ID:      id,
-			Runtime: slot.Runtime.Runtime,
-			Version: slot.Runtime.Version,
+			Runtime: slot.Runtime.Runtime(),
+			Version: slot.Runtime.Version(),
 			Model:   slot.Model,
 		})
 	}

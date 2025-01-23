@@ -7,6 +7,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/helixml/helix/api/pkg/types"
 	"github.com/rs/zerolog/log"
+	openai "github.com/sashabaranov/go-openai"
 )
 
 // Slot is the crazy mirror equivalent of scheduler.Slot
@@ -16,16 +17,31 @@ import (
 type Slot struct {
 	ID       uuid.UUID // Same as scheduler.Slot
 	RunnerID string    // Same as scheduler.Slot
-	Runtime  *OllamaRuntime
+	Runtime  Runtime
 	Model    string // The model assigned to this slot
 }
 
+type Runtime interface {
+	Start(ctx context.Context) error
+	Stop() error
+	PullModel(ctx context.Context, model string, progress func(PullProgress) error) error
+	Warm(ctx context.Context, model string) error
+	OpenAIClient() *openai.Client
+	Version() string
+	Runtime() types.Runtime
+}
+
 func CreateSlot(ctx context.Context, slotID uuid.UUID, runnerID string, runtime types.Runtime, model string) (*Slot, error) {
-	var r *OllamaRuntime
+	var r Runtime
 	var err error
 	switch runtime {
 	case types.RuntimeOllama:
 		r, err = NewOllamaRuntime(ctx, OllamaRuntimeParams{}) // TODO(phil): Add params
+		if err != nil {
+			return nil, err
+		}
+	case types.RuntimeDiffusers:
+		r, err = NewDiffusersRuntime(ctx, DiffusersRuntimeParams{}) // TODO(phil): Add params
 		if err != nil {
 			return nil, err
 		}
@@ -40,13 +56,13 @@ func CreateSlot(ctx context.Context, slotID uuid.UUID, runnerID string, runtime 
 	}
 
 	// Check that the model is available in this runtime
-	models, err := r.ListModels(ctx)
+	models, err := r.OpenAIClient().ListModels(ctx)
 	if err != nil {
 		return nil, err
 	}
 	found := false
-	for _, m := range models {
-		if m.Name == model {
+	for _, m := range models.Models {
+		if m.ID == model {
 			found = true
 			break
 		}

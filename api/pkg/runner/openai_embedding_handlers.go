@@ -16,7 +16,7 @@ import (
 )
 
 func (s *HelixRunnerAPIServer) createEmbedding(rw http.ResponseWriter, r *http.Request) {
-	if s.cfg == nil {
+	if s.runnerOptions == nil {
 		http.Error(rw, "runner server not initialized", http.StatusInternalServerError)
 		return
 	}
@@ -60,7 +60,7 @@ func (s *HelixRunnerAPIServer) createEmbedding(rw http.ResponseWriter, r *http.R
 		return
 	}
 
-	ownerID := s.cfg.ID
+	ownerID := s.runnerOptions.ID
 	user := getRequestUser(r)
 	if user != nil {
 		ownerID = user.ID
@@ -83,7 +83,7 @@ func (s *HelixRunnerAPIServer) createEmbedding(rw http.ResponseWriter, r *http.R
 	}
 
 	log.Trace().Str("model", slot.Model).Msg("creating chat completion")
-	resp, err := slot.Runtime.OpenAIClient.CreateEmbeddings(ctx, embeddingRequest)
+	resp, err := slot.Runtime.OpenAIClient().CreateEmbeddings(ctx, embeddingRequest)
 	if err != nil {
 		log.Error().Err(err).Msg("error creating chat completion")
 		http.Error(rw, err.Error(), http.StatusInternalServerError)
