@@ -138,7 +138,12 @@ func (apiServer *HelixRunnerAPIServer) createSlot(w http.ResponseWriter, r *http
 
 	// Must pass the context from the cli to ensure that the underlying runtime continues to run so
 	// long as the cli is running
-	s, err := CreateSlot(apiServer.cliContext, slot.ID, apiServer.runnerOptions.ID, slot.Attributes.Runtime, slot.Attributes.Model)
+	s, err := CreateSlot(apiServer.cliContext, CreateSlotParams{
+		RunnerOptions: apiServer.runnerOptions,
+		ID:            slot.ID,
+		Runtime:       slot.Attributes.Runtime,
+		Model:         slot.Attributes.Model,
+	})
 	if err != nil {
 		if strings.Contains(err.Error(), "pull model manifest: file does not exist") {
 			http.Error(w, err.Error(), http.StatusNotFound)
