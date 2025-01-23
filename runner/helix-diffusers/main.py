@@ -7,14 +7,14 @@ import uuid
 from contextlib import asynccontextmanager
 from typing import List
 
+import diffusers
 import PIL
 import torch
-from diffusers import AutoPipelineForText2Image
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
 from huggingface_hub import snapshot_download
+from pydantic import BaseModel
 
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
@@ -49,7 +49,7 @@ class TextToImagePipeline:
             if torch.cuda.is_available():
                 logger.info("Loading CUDA")
                 self.device = "cuda"
-                self.pipeline = AutoPipelineForText2Image.from_pretrained(
+                self.pipeline = diffusers.AutoPipelineForText2Image.from_pretrained(
                     model_id,
                     torch_dtype=torch.bfloat16,
                     local_files_only=True,
@@ -58,7 +58,7 @@ class TextToImagePipeline:
             elif torch.backends.mps.is_available():
                 logger.info("Loading MPS for Mac M Series")
                 self.device = "mps"
-                self.pipeline = AutoPipelineForText2Image.from_pretrained(
+                self.pipeline = diffusers.AutoPipelineForText2Image.from_pretrained(
                     model_id,
                     torch_dtype=torch.bfloat16,
                     local_files_only=True,
@@ -159,17 +159,19 @@ def download_model(model_name: str, save_path: str):
     # Check the location of the downloaded models
     print(f"Model successfully downloaded to: {save_path}")
 
-class ListModelsResponse(BaseModel):
-    models: List[Model]
 
 class Model(BaseModel):
-    CreatedAt: int64
+    CreatedAt: int
     ID: str
     Object: str
     OwnedBy: str
     Permission: List[str]
     Root: str
     Parent: str
+    
+class ListModelsResponse(BaseModel):
+    models: List[Model]
+
 
 @app.get("/models", response_model=ListModelsResponse)
 async def list_models():
