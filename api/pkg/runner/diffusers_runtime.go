@@ -34,7 +34,6 @@ type DiffusersRuntime struct {
 	port            int
 	cmd             *exec.Cmd
 	cancel          context.CancelFunc
-	filter          types.SessionFilter
 	startTimeout    time.Duration
 }
 
@@ -100,8 +99,7 @@ func (d *DiffusersRuntime) Start(ctx context.Context) error {
 	}()
 
 	// Start ollama cmd
-	// startDiffusersCmd(ctx context.Context, commander Commander, port int, modelName string, cacheDir string, filter types.SessionFilter)
-	cmd, err := startDiffusersCmd(ctx, diffusersCommander, d.port, d.cacheDir, d.filter)
+	cmd, err := startDiffusersCmd(ctx, diffusersCommander, d.port, d.cacheDir)
 	if err != nil {
 		return fmt.Errorf("error building ollama cmd: %w", err)
 	}
@@ -175,7 +173,7 @@ func (d *DiffusersRuntime) Version() string {
 	return d.version
 }
 
-func startDiffusersCmd(ctx context.Context, commander Commander, port int, cacheDir string, filter types.SessionFilter) (*exec.Cmd, error) {
+func startDiffusersCmd(ctx context.Context, commander Commander, port int, cacheDir string) (*exec.Cmd, error) {
 	// Find uv on the path
 	uvPath, err := commander.LookPath("uv")
 	if err != nil {
@@ -185,19 +183,13 @@ func startDiffusersCmd(ctx context.Context, commander Commander, port int, cache
 
 	log.Trace().Msg("Preparing Diffusers command")
 	var cmd *exec.Cmd
-	if filter.Mode == types.SessionModeInference {
-		cmd = exec.CommandContext(
-			ctx,
-			"uv", "run", "--frozen", "--no-dev", // Don't install dev dependencies
-			"uvicorn", "main:app",
-			"--host", "0.0.0.0",
-			"--port", strconv.Itoa(port),
-		)
-	} else if filter.Mode == types.SessionModeFinetune {
-		return nil, fmt.Errorf("finetuning not supported for diffusers models")
-	} else {
-		return nil, fmt.Errorf("invalid session mode: %s", filter.Mode)
-	}
+	cmd = exec.CommandContext(
+		ctx,
+		"uv", "run", "--frozen", "--no-dev", // Don't install dev dependencies
+		"uvicorn", "main:app",
+		"--host", "0.0.0.0",
+		"--port", strconv.Itoa(port),
+	)
 
 	// Set the working directory to the runner dir (which makes relative path stuff easier)
 	cmd.Dir = "/workspace/helix/runner/helix-diffusers"
