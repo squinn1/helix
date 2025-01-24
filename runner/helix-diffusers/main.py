@@ -250,6 +250,7 @@ async def stream_progress(prompt: str):
     progress_queue = asyncio.Queue()
 
     def diffusion_callback(pipe: diffusers.DiffusionPipeline, step: int, timestep: int, kwargs: Dict):
+        logger.info(f"diffusion_callback called with step: {step}, timestep: {timestep}, kwargs: {kwargs}")
         try:
             # Construct progress object with safe defaults
             progress = ImageResponse(
