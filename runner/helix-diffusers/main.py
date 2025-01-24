@@ -233,11 +233,14 @@ class ImageResponse(BaseModel):
 
 
 async def stream_progress(prompt: str):
-    """Coroutine that yields SSE data while an image is generated in a background thread."""
+    """Coroutine that yields SSE data while generating images in background."""
+    # 1) Capture the main event loop
+    loop = asyncio.get_event_loop()
     progress_queue = asyncio.Queue()
 
-    # The diffusers callback signature is typically: (step, timestep, latents)
-    def callback_fn(step: int, timestep: int, latents: torch.FloatTensor):
+    # 2) Define callback that runs in the *worker* thread
+    def diffusion_callback(step: int, timestep: int, latents: torch.FloatTensor):
+        # Construct your partial progress object
         progress = ImageResponse(
             created=int(datetime.now().timestamp()),
             step=step,
@@ -246,54 +249,52 @@ async def stream_progress(prompt: str):
             completed=False,
             data=[],
         )
-        # Put the progress update into the async queue in a thread-safe way
-        loop = asyncio.get_running_loop()
+        # 3) Put it in the async queue using loop.call_soon_threadsafe
         loop.call_soon_threadsafe(
-            lambda: asyncio.create_task(progress_queue.put(progress.model_dump_json()))
+            progress_queue.put_nowait,
+            progress.model_dump_json()
         )
 
+    # 4) Launch the generation in a separate thread, so we don't block
+    generation_task = asyncio.create_task(
+        asyncio.to_thread(shared_pipeline.generate, prompt, diffusion_callback)
+    )
+
+    # 5) Continuously yield SSE events as progress messages arrive
     try:
-        # Run generation in the background (a separate thread so we don't block)
-        generation_task = asyncio.create_task(
-            asyncio.to_thread(
-                shared_pipeline.generate,
-                prompt=prompt,
-                callback=callback_fn
-            )
-        )
-
-        # While the generation is ongoing, stream incremental progress
         while not generation_task.done():
             try:
-                # Wait for next progress update with a small timeout
                 progress_json = await asyncio.wait_for(progress_queue.get(), timeout=0.2)
                 yield f"data: {progress_json}\n\n"
             except asyncio.TimeoutError:
-                # No new progress yet, just loop
-                continue
-
-        # Generation is finished: retrieve final images
+                # No progress update yet
+                pass
+        
+        # 6) Once done, gather final images
         images = await generation_task
-        urls = [save_image(img)[1] for img in images]
+        urls = []
+        for im in images:
+            _, url = save_image(im)
+            urls.append(url)
 
         final_response = ImageResponse(
             created=int(datetime.now().timestamp()),
-            data=[ImageResponseDataInner(url=url, b64_json="", revised_prompt="") for url in urls],
-            completed=True,
-            error="",
             step=0,
             timestep=0,
+            error="",
+            completed=True,
+            data=[ImageResponseDataInner(url=u, b64_json="", revised_prompt="") for u in urls]
         )
         yield f"data: {final_response.model_dump_json()}\n\n"
 
     except Exception as e:
         error_response = ImageResponse(
             created=int(datetime.now().timestamp()),
-            data=[],
-            completed=True,
-            error=str(e),
             step=0,
             timestep=0,
+            error=str(e),
+            completed=True,
+            data=[],
         )
         yield f"data: {error_response.model_dump_json()}\n\n"
 
