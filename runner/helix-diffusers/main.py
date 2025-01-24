@@ -201,8 +201,8 @@ async def generate_image(image_input: TextToImageInput):
             None, lambda: shared_pipeline.generate(image_input.prompt)
         )
         logger.info(f"output: {output}")
-        image_path, image_url = save_image(output[0])
-        return {"data": [{"url": image_url, "path": image_path}]}
+        image_path = save_image(output[0])
+        return {"data": [{"url": image_path}]}
     except Exception as e:
         raise HTTPException(
             status_code=500,
