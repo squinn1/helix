@@ -77,13 +77,14 @@ class TextToImagePipeline:
     def generate(
         self,
         prompt: str,
-        callback: Optional[Callable[[int, int, torch.FloatTensor], None]] = None,
+        on_step: Optional[Callable[[diffusers.DiffusionPipeline, int, int, Dict], None]] = None,
     ) -> List[PIL.Image.Image]:
         """Generate images, optionally with a step callback.
 
         Args:
             prompt (str): The text prompt for image generation.
-            callback (callable): diffusers uses callback(step, timestep, latents).
+            on_step (callable): Called at the end of each step with (pipeline, step, timestep, callback_kwargs).
+                              callback_kwargs contains the latents tensor.
         """
         logging.info(f"Generate called with pipeline state: {self.pipeline is not None}")
         if self.pipeline is None:
@@ -96,15 +97,14 @@ class TextToImagePipeline:
             scheduler = self.pipeline.scheduler.from_config(self.pipeline.scheduler.config)
             self.pipeline.scheduler = scheduler
 
-            # The important part: pass callback=..., callback_steps=... to get updates each step
             result = self.pipeline(
                 prompt=prompt,
                 num_inference_steps=50,
                 guidance_scale=7.5,
                 height=720,
                 width=1280,
-                callback=callback,         # <--- THIS is the correct argument name
-                callback_steps=1,         # <--- Usually set to 1 so you get all steps
+                callback_on_step_end=on_step,
+                callback_on_step_end_tensor_inputs=["latents"],
             )
             return result.images
 
@@ -234,13 +234,10 @@ class ImageResponse(BaseModel):
 
 async def stream_progress(prompt: str):
     """Coroutine that yields SSE data while generating images in background."""
-    # 1) Capture the main event loop
     loop = asyncio.get_event_loop()
     progress_queue = asyncio.Queue()
 
-    # 2) Define callback that runs in the *worker* thread
-    def diffusion_callback(step: int, timestep: int, latents: torch.FloatTensor):
-        # Construct your partial progress object
+    def on_step(pipe: diffusers.DiffusionPipeline, step: int, timestep: int, callback_kwargs: Dict):
         progress = ImageResponse(
             created=int(datetime.now().timestamp()),
             step=step,
@@ -249,28 +246,23 @@ async def stream_progress(prompt: str):
             completed=False,
             data=[],
         )
-        # 3) Put it in the async queue using loop.call_soon_threadsafe
         loop.call_soon_threadsafe(
             progress_queue.put_nowait,
             progress.model_dump_json()
         )
 
-    # 4) Launch the generation in a separate thread, so we don't block
     generation_task = asyncio.create_task(
-        asyncio.to_thread(shared_pipeline.generate, prompt, diffusion_callback)
+        asyncio.to_thread(shared_pipeline.generate, prompt, on_step)
     )
 
-    # 5) Continuously yield SSE events as progress messages arrive
     try:
         while not generation_task.done():
             try:
                 progress_json = await asyncio.wait_for(progress_queue.get(), timeout=0.2)
                 yield f"data: {progress_json}\n\n"
             except asyncio.TimeoutError:
-                # No progress update yet
                 pass
         
-        # 6) Once done, gather final images
         images = await generation_task
         urls = []
         for im in images:
