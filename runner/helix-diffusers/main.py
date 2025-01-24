@@ -208,9 +208,11 @@ class ImageResponse(BaseModel):
 
 
 async def stream_progress(prompt: str):
+    # Create queue for progress updates
     progress_queue = asyncio.Queue()
-
-    def callback_fn(pipeline: diffusers.DiffusionPipeline, step: int, timestep: int, callback_kwargs: Dict) -> None:
+    
+    def callback_fn(pipeline, step: int, timestep: int, callback_kwargs: Dict) -> None:
+        # Create progress update
         progress = ImageResponse(
             created=int(datetime.now().timestamp()),
             step=step,
@@ -219,12 +221,15 @@ async def stream_progress(prompt: str):
             completed=False,
             data=[],
         )
-        # Use sync version of put since we're in a callback
-        asyncio.run_coroutine_threadsafe(progress_queue.put(progress.model_dump_json()), asyncio.get_event_loop())
+        # Put progress directly into queue
+        asyncio.run_coroutine_threadsafe(
+            progress_queue.put(progress.model_dump_json()),
+            asyncio.get_running_loop()
+        )
         return callback_kwargs
 
     try:
-        # Start generation in background
+        # Start image generation in background
         generation_task = asyncio.create_task(
             asyncio.to_thread(
                 shared_pipeline.generate,
@@ -241,21 +246,17 @@ async def stream_progress(prompt: str):
             except asyncio.TimeoutError:
                 continue
 
-        # Get the final result
-        output = await generation_task
-
-        urls = []
-        for image in output:
-            image_path, image_url = save_image(image)
-            urls.append(image_path)
+        # Get and process final result
+        images = await generation_task
+        urls = [save_image(image)[0] for image in images]
         
-        result = ImageResponse(
-            created=datetime.now().timestamp(),
+        final_response = ImageResponse(
+            created=int(datetime.now().timestamp()),
             data=[ImageResponseDataInner(url=url) for url in urls],
             completed=True,
             error="",
         )
-        yield f"data: {result.model_dump_json()}\n\n"
+        yield f"data: {final_response.model_dump_json()}\n\n"
 
     except Exception as e:
         yield f"data: {{'error': '{str(e)}'}}\n\n"
