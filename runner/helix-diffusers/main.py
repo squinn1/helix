@@ -219,26 +219,27 @@ async def stream_progress(prompt: str):
             completed=False,
             data=[],
         )
-        progress_queue.put_nowait(progress.model_dump_json())
+        # Use sync version of put since we're in a callback
+        asyncio.run_coroutine_threadsafe(progress_queue.put(progress.model_dump_json()), asyncio.get_event_loop())
         return callback_kwargs
 
     try:
         # Start generation in background
         generation_task = asyncio.create_task(
-            asyncio.get_running_loop().run_in_executor(
-                None,
-                lambda: shared_pipeline.generate(prompt=prompt, callback_on_step_end=callback_fn)
+            asyncio.to_thread(
+                shared_pipeline.generate,
+                prompt=prompt,
+                callback_on_step_end=callback_fn
             )
         )
 
         # Stream progress while generating
-        while True:
+        while not generation_task.done():
             try:
-                progress = await asyncio.wait_for(progress_queue.get(), timeout=60.0)
-                yield f"data: {str(progress)}\n\n"
+                progress = await asyncio.wait_for(progress_queue.get(), timeout=1.0)
+                yield f"data: {progress}\n\n"
             except asyncio.TimeoutError:
-                if generation_task.done():
-                    break
+                continue
 
         # Get the final result
         output = await generation_task
