@@ -234,7 +234,7 @@ async def stream_progress(prompt: str):
         # Stream progress while generating
         while True:
             try:
-                progress = await asyncio.wait_for(progress_queue.get(), timeout=1.0)
+                progress = await asyncio.wait_for(progress_queue.get(), timeout=60.0)
                 yield f"data: {str(progress)}\n\n"
             except asyncio.TimeoutError:
                 if generation_task.done():
