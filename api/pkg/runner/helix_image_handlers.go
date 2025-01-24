@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"time"
 
 	"github.com/google/uuid"
 	"github.com/gorilla/mux"
@@ -43,17 +42,8 @@ func (s *HelixRunnerAPIServer) createHelixImageGeneration(w http.ResponseWriter,
 
 	log.Trace().Str("body", string(body)).Msg("parsing nats reply request")
 
-	var req types.RunnerNatsReplyRequest
-	err = json.Unmarshal(body, &req)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-
-	log.Trace().Str("request", string(req.Request)).Msg("parsing image request")
-
 	var imageRequest openai.ImageRequest
-	err = json.Unmarshal(req.Request, &imageRequest)
+	err = json.Unmarshal(body, &imageRequest)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
@@ -64,6 +54,13 @@ func (s *HelixRunnerAPIServer) createHelixImageGeneration(w http.ResponseWriter,
 	}
 	if imageRequest.Model != slot.Model {
 		http.Error(w, fmt.Sprintf("model mismatch, expecting %s", slot.Model), http.StatusBadRequest)
+		return
+	}
+
+	// Parse Session ID header from request
+	sessionID := r.Header.Get(types.SessionIDHeader)
+	if sessionID == "" {
+		http.Error(w, "session id header is required", http.StatusBadRequest)
 		return
 	}
 
@@ -89,7 +86,7 @@ func (s *HelixRunnerAPIServer) createHelixImageGeneration(w http.ResponseWriter,
 	for _, image := range response.Data {
 		localFiles = append(localFiles, image.URL)
 	}
-	resFiles, err := fileHandler.uploadFiles(req.SessionID, localFiles, types.FilestoreResultsDir)
+	resFiles, err := fileHandler.uploadFiles(sessionID, localFiles, types.FilestoreResultsDir)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -116,25 +113,7 @@ func (s *HelixRunnerAPIServer) createHelixImageGeneration(w http.ResponseWriter,
 		// 	return
 		// }
 
-		responseBytes, err := json.Marshal(response)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-
-		// Convert the response to a nats reply response
-		helixResponse := types.RunnerNatsReplyResponse{
-			RequestID:     req.RequestID,
-			CreatedAt:     time.Now(),
-			OwnerID:       req.OwnerID,
-			SessionID:     req.SessionID,
-			InteractionID: req.InteractionID,
-			Progress:      1.0,
-			Response:      responseBytes,
-		}
-
-		// Write the response to the client
-		bts, err := json.Marshal(helixResponse)
+		bts, err := json.Marshal(response)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return

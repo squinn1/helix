@@ -126,27 +126,27 @@ func (c *NatsController) handleGenericHTTPRequest(ctx context.Context, task type
 	url, err := url.Parse(task.URL)
 	if err != nil {
 		log.Error().Err(err).Str("url", task.URL).Msg("failed to parse URL")
-		return &types.Response{StatusCode: 400, Body: "Unable to parse request URL"}
+		return &types.Response{StatusCode: 400, Body: []byte("Unable to parse request URL")}
 	}
 
 	req, err := http.NewRequestWithContext(ctx, task.Method, c.serverURL+url.Path, bytes.NewBuffer([]byte(task.Body)))
 	if err != nil {
 		log.Error().Err(err).Msg("failed to create HTTP request")
-		return &types.Response{StatusCode: 500, Body: "Failed to create request"}
+		return &types.Response{StatusCode: 500, Body: []byte("Failed to create request")}
 	}
 
 	client := &http.Client{}
 	resp, err := client.Do(req)
 	if err != nil {
 		log.Error().Err(err).Msg("failed to execute HTTP request")
-		return &types.Response{StatusCode: 500, Body: "Request failed"}
+		return &types.Response{StatusCode: 500, Body: []byte("Request failed")}
 	}
 	defer resp.Body.Close()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		log.Error().Err(err).Msg("failed to read response body")
-		return &types.Response{StatusCode: 500, Body: "Failed to read response"}
+		return &types.Response{StatusCode: 500, Body: []byte("Failed to read response")}
 	}
 
 	log.Trace().
@@ -156,7 +156,7 @@ func (c *NatsController) handleGenericHTTPRequest(ctx context.Context, task type
 
 	return &types.Response{
 		StatusCode: resp.StatusCode,
-		Body:       string(body),
+		Body:       body,
 	}
 }
 
@@ -165,36 +165,31 @@ func (c *NatsController) handleNatsReplyRequest(ctx context.Context, task types.
 	url, err := url.Parse(task.URL)
 	if err != nil {
 		log.Error().Err(err).Str("url", task.URL).Msg("failed to parse URL")
-		return &types.Response{StatusCode: 400, Body: "Unable to parse request URL"}
+		return &types.Response{StatusCode: 400, Body: []byte("Unable to parse request URL")}
 	}
 
-	// Parse nats reply request
-	var helixRequest types.RunnerNatsReplyRequest
-	if err := json.Unmarshal([]byte(task.Body), &helixRequest); err != nil {
+	var req types.RunnerNatsReplyRequest
+	if err := json.Unmarshal(task.Body, &req); err != nil {
 		log.Error().Err(err).Msg("failed to parse nats reply request")
-		return &types.Response{StatusCode: 400, Body: "Invalid nats reply request format"}
+		return &types.Response{StatusCode: 400, Body: []byte("Invalid nats reply request format")}
 	}
-
-	log.Trace().
-		Str("request_id", helixRequest.RequestID).
-		Str("owner_id", helixRequest.OwnerID).
-		Str("session_id", helixRequest.SessionID).
-		Str("request", string(helixRequest.Request)).
-		Msg("parsed nats reply request")
 
 	// Create HTTP request
-	req, err := http.NewRequestWithContext(ctx, task.Method, c.serverURL+url.Path, bytes.NewReader(helixRequest.Request))
+	httpReq, err := http.NewRequestWithContext(ctx, task.Method, c.serverURL+url.Path, bytes.NewReader(req.Request))
 	if err != nil {
 		log.Error().Err(err).Msg("failed to create nats reply HTTP request")
-		return &types.Response{StatusCode: 500, Body: "Failed to create request"}
+		return &types.Response{StatusCode: 500, Body: []byte("Failed to create request")}
 	}
+
+	// Add session ID header has a hacky workaround to allow downstream APIs to use the session ID
+	httpReq.Header.Set(types.SessionIDHeader, req.SessionID)
 
 	// Execute request
 	client := &http.Client{}
-	resp, err := client.Do(req)
+	resp, err := client.Do(httpReq)
 	if err != nil {
 		log.Error().Err(err).Msg("failed to execute nats reply HTTP request")
-		return &types.Response{StatusCode: 500, Body: "Request failed"}
+		return &types.Response{StatusCode: 500, Body: []byte("Request failed")}
 	}
 	defer resp.Body.Close()
 
@@ -209,15 +204,14 @@ func (c *NatsController) handleNatsReplyRequest(ctx context.Context, task types.
 	// Handle streaming vs non-streaming responses
 	if strings.Contains(resp.Header.Get("Content-Type"), "text/event-stream") {
 		log.Debug().Msg("handling streaming nats reply response")
-		return c.handleStreamingResponse(ctx, resp, responseQueue, &helixRequest, start)
+		return c.handleStreamingResponse(ctx, req, resp, responseQueue, start)
 	}
 	log.Debug().Msg("handling regular nats reply response")
-	return c.handleRegularResponse(ctx, resp, responseQueue, &helixRequest, start)
+	return c.handleRegularResponse(ctx, req, resp, responseQueue, start)
 }
 
-func (c *NatsController) handleStreamingResponse(ctx context.Context, resp *http.Response, responseQueue string, req *types.RunnerNatsReplyRequest, start time.Time) *types.Response {
+func (c *NatsController) handleStreamingResponse(ctx context.Context, req types.RunnerNatsReplyRequest, resp *http.Response, responseQueue string, start time.Time) *types.Response {
 	log.Debug().
-		Str("request_id", req.RequestID).
 		Str("response_queue", responseQueue).
 		Msg("starting stream processing")
 
@@ -227,16 +221,16 @@ func (c *NatsController) handleStreamingResponse(ctx context.Context, resp *http
 		select {
 		case <-ctx.Done():
 			log.Debug().Msg("stream processing cancelled")
-			return &types.Response{StatusCode: 500, Body: "Stream closed"}
+			return &types.Response{StatusCode: 500, Body: []byte("Stream closed")}
 		default:
 			chunk, err := reader.ReadBytes('\n')
 			if err == io.EOF {
 				log.Debug().Msg("stream completed")
-				return &types.Response{StatusCode: 200, Body: "Stream completed"}
+				return &types.Response{StatusCode: 200, Body: []byte("Stream completed")}
 			}
 			if err != nil {
 				log.Error().Err(err).Msg("error reading stream chunk")
-				return &types.Response{StatusCode: 500, Body: "Stream error"}
+				return &types.Response{StatusCode: 500, Body: []byte("Stream error")}
 			}
 
 			// Skip empty chunks
@@ -257,11 +251,11 @@ func (c *NatsController) handleStreamingResponse(ctx context.Context, resp *http
 	}
 }
 
-func (c *NatsController) handleRegularResponse(ctx context.Context, resp *http.Response, responseQueue string, req *types.RunnerNatsReplyRequest, start time.Time) *types.Response {
+func (c *NatsController) handleRegularResponse(ctx context.Context, req types.RunnerNatsReplyRequest, resp *http.Response, responseQueue string, start time.Time) *types.Response {
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		log.Error().Err(err).Msg("failed to read response body")
-		return &types.Response{StatusCode: 500, Body: "Failed to read response"}
+		return &types.Response{StatusCode: 500, Body: []byte("Failed to read response")}
 	}
 
 	log.Trace().
@@ -272,19 +266,18 @@ func (c *NatsController) handleRegularResponse(ctx context.Context, resp *http.R
 
 	if err := c.publishResponse(ctx, responseQueue, req, body, start); err != nil {
 		log.Error().Err(err).Msg("failed to publish response")
-		return &types.Response{StatusCode: 500, Body: "Failed to publish response"}
+		return &types.Response{StatusCode: 500, Body: []byte("Failed to publish response")}
 	}
 
 	return &types.Response{
 		StatusCode: resp.StatusCode,
-		Body:       string(body),
+		Body:       body,
 	}
 }
 
 // publishResponse publishes responses to NATS
-func (c *NatsController) publishResponse(ctx context.Context, queue string, req *types.RunnerNatsReplyRequest, resp []byte, start time.Time) error {
+func (c *NatsController) publishResponse(ctx context.Context, queue string, req types.RunnerNatsReplyRequest, resp []byte, start time.Time) error {
 	log.Trace().
-		Str("request_id", req.RequestID).
 		Str("queue", queue).
 		Int64("duration_ms", time.Since(start).Milliseconds()).
 		Msg("publishing nats reply response")

@@ -158,7 +158,7 @@ func (c *RunnerController) SubmitChatCompletionRequest(slot *scheduler.Slot, req
 	resp, err := c.Send(c.ctx, slot.RunnerID, headers, &types.Request{
 		Method: "POST",
 		URL:    fmt.Sprintf("/api/v1/slots/%s/v1/chat/completions", slot.ID),
-		Body:   string(body),
+		Body:   body,
 	})
 	if err != nil {
 		return err
@@ -223,7 +223,7 @@ func (c *RunnerController) SubmitImageGenerationRequest(slot *scheduler.Slot, se
 	resp, err := c.Send(c.ctx, slot.RunnerID, headers, &types.Request{
 		Method: "POST",
 		URL:    fmt.Sprintf("/api/v1/slots/%s/v1/helix/images/generations", slot.ID),
-		Body:   string(body),
+		Body:   body,
 	})
 	if err != nil {
 		return err
@@ -250,7 +250,7 @@ func (c *RunnerController) CreateSlot(slot *scheduler.Slot) error {
 	resp, err := c.Send(c.ctx, slot.RunnerID, nil, &types.Request{
 		Method: "POST",
 		URL:    "/api/v1/slots",
-		Body:   string(body),
+		Body:   body,
 	})
 	if err != nil {
 		return err

@@ -6,19 +6,21 @@ import (
 	"github.com/google/uuid"
 )
 
+const SessionIDHeader = "X-Session-ID"
+
 type Request struct {
 	Method string `json:"method"`
 	URL    string `json:"url"`
-	Body   string `json:"body"`
+	Body   []byte `json:"body"`
 }
 
 type Response struct {
 	StatusCode int    `json:"status_code"`
-	Body       string `json:"body"`
+	Body       []byte `json:"body"`
 }
 
 type StreamingResponse struct {
-	Body string `json:"body"`
+	Body []byte `json:"body"`
 	Done bool   `json:"done"`
 }
 
