@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/gorilla/mux"
+	"github.com/helixml/helix/api/pkg/system"
 	"github.com/helixml/helix/api/pkg/types"
 	"github.com/rs/zerolog/log"
 	openai "github.com/sashabaranov/go-openai"
@@ -70,6 +71,28 @@ func (s *HelixRunnerAPIServer) createHelixImageGeneration(w http.ResponseWriter,
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
+	}
+
+	// Intercept the result and upload the files to the control plane
+	clientOptions := system.ClientOptions{
+		Host:  s.runnerOptions.APIHost,
+		Token: s.runnerOptions.APIToken,
+	}
+	fileHandler := NewFileHandler(s.runnerOptions.ID, clientOptions, func(response *types.RunnerTaskResponse) {
+		log.Debug().Interface("response", response).Msg("File handler event")
+	})
+	localFiles := []string{}
+	for _, image := range response.Data {
+		localFiles = append(localFiles, image.URL)
+	}
+	resFiles, err := fileHandler.uploadFiles(req.SessionID, localFiles, types.FilestoreResultsDir)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	// Overwrite the original urls with the new ones
+	for i, image := range response.Data {
+		image.URL = resFiles[i]
 	}
 
 	w.Header().Set("Content-Type", "text/event-stream")

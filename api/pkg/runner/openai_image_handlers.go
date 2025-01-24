@@ -19,7 +19,7 @@ func (s *HelixRunnerAPIServer) createImageGeneration(w http.ResponseWriter, r *h
 		http.Error(w, fmt.Sprintf("invalid slot id: %s", slot_id), http.StatusBadRequest)
 		return
 	}
-	log.Trace().Str("slot_id", slot_id).Msg("create chat completion")
+	log.Trace().Str("slot_id", slot_id).Msg("create image generation")
 
 	body, err := io.ReadAll(io.LimitReader(r.Body, 10*MEGABYTE))
 	if err != nil {

@@ -171,9 +171,9 @@ func (c *RunnerController) SubmitChatCompletionRequest(slot *scheduler.Slot, req
 }
 
 func (c *RunnerController) SubmitImageGenerationRequest(slot *scheduler.Slot, session *types.Session) error {
-	lastInteractions := data.GetLastInteractions(session, 1)
-	if len(lastInteractions) == 0 {
-		return fmt.Errorf("no last interaction found")
+	lastInteraction, err := data.GetLastInteraction(session)
+	if err != nil {
+		return fmt.Errorf("no last interaction found: %w", err)
 	}
 
 	userInteractions := data.FilterUserInteractions(session.Interactions)
@@ -191,7 +191,7 @@ func (c *RunnerController) SubmitImageGenerationRequest(slot *scheduler.Slot, se
 		prompt.WriteString("\n")
 	}
 	prompt.WriteString("Here is the current interaction:\n\n")
-	prompt.WriteString(lastInteractions[0].Message)
+	prompt.WriteString(lastInteraction.Message)
 
 	// Convert the session to a valid image generation request
 	imageRequest := openai.ImageRequest{
@@ -205,11 +205,11 @@ func (c *RunnerController) SubmitImageGenerationRequest(slot *scheduler.Slot, se
 		return err
 	}
 	req := &types.RunnerNatsReplyRequest{
-		RequestID:     lastInteractions[0].ID, // Use the last interaction ID as the request ID for sessions, it's important that this kept in sync with the receiver code
+		RequestID:     lastInteraction.ID, // Use the last interaction ID as the request ID for sessions, it's important that this kept in sync with the receiver code
 		CreatedAt:     time.Now(),
 		OwnerID:       session.Owner,
 		SessionID:     session.ID,
-		InteractionID: lastInteractions[0].ID,
+		InteractionID: lastInteraction.ID,
 		Request:       requestBytes,
 	}
 

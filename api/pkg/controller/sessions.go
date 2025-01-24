@@ -14,6 +14,7 @@ import (
 
 	"github.com/jinzhu/copier"
 	"github.com/rs/zerolog/log"
+	openai "github.com/sashabaranov/go-openai"
 
 	"github.com/helixml/helix/api/pkg/data"
 	"github.com/helixml/helix/api/pkg/notification"
@@ -28,6 +29,8 @@ import (
 
 // set to false in production (will log messages to web UI)
 const DEBUG = true
+
+var runnerResponseTimeout = 180 * time.Second
 
 func (c *Controller) StartSession(ctx context.Context, user *types.User, req types.InternalSessionRequest) (*types.Session, error) {
 	assistantInteraction := &types.Interaction{
@@ -865,6 +868,79 @@ func (c *Controller) AddSessionToQueue(session *types.Session) error {
 		return fmt.Errorf("error creating workload: %w", err)
 	}
 	if c.schedulerV2 != nil {
+		lastInteraction, err := data.GetLastInteraction(session)
+		if err != nil {
+			return fmt.Errorf("error getting last interaction: %w", err)
+		}
+		// Create a pubsub subscription to listen for responses to this session
+		sub, err := c.Options.PubSub.Subscribe(c.Ctx, pubsub.GetRunnerResponsesQueue(session.Owner, lastInteraction.ID), func(payload []byte) error {
+			log.Debug().Str("owner", session.Owner).Str("request_id", lastInteraction.ID).Msg("received runner response, closing channel")
+
+			var runnerResp types.RunnerNatsReplyResponse
+			err := json.Unmarshal(payload, &runnerResp)
+			if err != nil {
+				return fmt.Errorf("error unmarshalling runner response: %w", err)
+			}
+
+			if runnerResp.Error != nil {
+				return fmt.Errorf("runner error: %w", runnerResp.Error)
+			}
+
+			var taskResponse types.RunnerTaskResponse
+
+			if session.Mode == types.SessionModeInference && session.Type == types.SessionTypeImage {
+				// Parse the openai response
+				var openaiResponse openai.ImageResponse
+				err = json.Unmarshal(runnerResp.Response, &openaiResponse)
+				if err != nil {
+					return fmt.Errorf("error unmarshalling openai response: %w", err)
+				}
+
+				files := []string{}
+				for _, image := range openaiResponse.Data {
+					files = append(files, image.URL)
+				}
+
+				// Convert nw Nats response types to old session handler types
+				taskResponse = types.RunnerTaskResponse{
+					Type:          types.WorkerTaskResponseTypeResult,
+					SessionID:     session.ID,
+					InteractionID: lastInteraction.ID,
+					Owner:         session.Owner,
+					Done:          true,
+					Status:        "done",
+					Progress:      100,
+					Files:         files,
+				}
+			} else {
+				return fmt.Errorf("unsupported session mode or type: %s %s", session.Mode, session.Type)
+			}
+
+			messageBytes, err := json.Marshal(taskResponse)
+			if err != nil {
+				return fmt.Errorf("error marshalling task response: %w", err)
+			}
+
+			// Republish to old session handler queues
+			err = c.Options.PubSub.Publish(c.Ctx, pubsub.GetSessionQueue(session.Owner, session.ID), messageBytes)
+			if err != nil {
+				log.Error().Msgf("Error publishing session update: %s", err.Error())
+			}
+
+			return nil
+		})
+		if err != nil {
+			return fmt.Errorf("error subscribing to runner responses queue: %w", err)
+		}
+
+		go func() {
+			ctx, cancel := context.WithTimeout(c.Ctx, runnerResponseTimeout)
+			defer cancel()
+
+			<-ctx.Done()
+			_ = sub.Unsubscribe()
+		}()
+
 		err = c.schedulerV2.Enqueue(work)
 		if err != nil {
 			return fmt.Errorf("error enqueuing work: %w", err)
