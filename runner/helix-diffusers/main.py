@@ -245,52 +245,56 @@ class ImageResponse(BaseModel):
 
 async def stream_progress(prompt: str):
     """Coroutine that yields SSE data while generating images in background."""
-    # 1) Capture the main event loop
     loop = asyncio.get_event_loop()
     progress_queue = asyncio.Queue()
 
-    # 2) Define callback that runs in the *worker* thread
     def diffusion_callback(pipe: diffusers.DiffusionPipeline, step: int, timestep: int, kwargs: Dict):
-        # Construct your partial progress object
-        progress = ImageResponse(
-            created=int(datetime.now().timestamp()),
-            step=step,
-            timestep=timestep,
-            error="",
-            completed=False,
-            data=[],
-        )
-        # 3) Put it in the async queue using loop.call_soon_threadsafe
-        loop.call_soon_threadsafe(
-            progress_queue.put_nowait,
-            progress.model_dump_json()
-        )
+        try:
+            # Construct progress object with safe defaults
+            progress = ImageResponse(
+                created=int(datetime.now().timestamp()),
+                step=step if step is not None else 0,
+                timestep=int(timestep) if timestep is not None else 0,
+                error="",
+                completed=False,
+                data=[],  # Empty list since we don't have intermediate images
+            )
+            # Safely put it in the queue
+            loop.call_soon_threadsafe(
+                progress_queue.put_nowait,
+                progress.model_dump_json()
+            )
+        except Exception as e:
+            logger.error(f"Error in callback: {str(e)}")
+            # Don't re-raise, just log, to prevent breaking the pipeline
 
-    # 4) Launch the generation in a separate thread, so we don't block
-    generation_task = asyncio.create_task(
-        asyncio.to_thread(shared_pipeline.generate, prompt, diffusion_callback)
-    )
-
-    # 5) Continuously yield SSE events as progress messages arrive
     try:
+        # Launch generation in separate thread
+        generation_task = asyncio.create_task(
+            asyncio.to_thread(
+                shared_pipeline.generate,
+                prompt,
+                diffusion_callback
+            )
+        )
+
         while not generation_task.done():
             try:
                 progress_json = await asyncio.wait_for(progress_queue.get(), timeout=0.2)
                 yield f"data: {progress_json}\n\n"
             except asyncio.TimeoutError:
-                # No progress update yet
                 pass
-        
-        # 6) Once done, gather final images
+
+        # Get final images
         images = await generation_task
         urls = []
         for im in images:
-            path, _ = save_image(im)
-            urls.append(path)
+            _, url = save_image(im)
+            urls.append(url)  # Use the URL instead of path
 
         final_response = ImageResponse(
             created=int(datetime.now().timestamp()),
-            step=0,
+            step=50,  # Final step
             timestep=0,
             error="",
             completed=True,
@@ -299,6 +303,7 @@ async def stream_progress(prompt: str):
         yield f"data: {final_response.model_dump_json()}\n\n"
 
     except Exception as e:
+        logger.error(f"Error in stream_progress: {str(e)}")
         error_response = ImageResponse(
             created=int(datetime.now().timestamp()),
             step=0,
