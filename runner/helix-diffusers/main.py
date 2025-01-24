@@ -1,12 +1,12 @@
 import asyncio
 import logging
 import os
+import queue
 import tempfile
 import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import Callable, Dict, List, Optional
-from venv import create
 
 import diffusers
 import PIL
@@ -209,8 +209,7 @@ class ImageResponse(BaseModel):
 
 async def stream_progress(prompt: str):
     # Use a standard Queue for thread-safe communication
-    from queue import Queue
-    progress_queue = Queue()
+    progress_queue = queue.Queue()
     
     def callback_fn(pipeline, step: int, timestep: int, callback_kwargs: Dict) -> None:
         progress = ImageResponse(
