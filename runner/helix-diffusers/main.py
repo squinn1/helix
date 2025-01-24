@@ -50,35 +50,23 @@ class TextToImagePipeline:
             if torch.cuda.is_available():
                 logger.info("Loading CUDA")
                 self.device = "cuda"
-                self.pipeline = diffusers.StableDiffusionPipeline.from_pretrained(
+                self.pipeline = diffusers.AutoPipelineForText2Image.from_pretrained(
                     model_id,
                     torch_dtype=torch.bfloat16,
                     local_files_only=True,
                     cache_dir=cache_dir,
-                    safety_checker=None,  # Explicitly disable safety checker
-                    requires_safety_checker=False,
                 ).to(device=self.device)
             elif torch.backends.mps.is_available():
                 logger.info("Loading MPS for Mac M Series")
                 self.device = "mps"
-                self.pipeline = diffusers.StableDiffusionPipeline.from_pretrained(
+                self.pipeline = diffusers.AutoPipelineForText2Image.from_pretrained(
                     model_id,
                     torch_dtype=torch.bfloat16,
                     local_files_only=True,
                     cache_dir=cache_dir,
-                    safety_checker=None,  # Explicitly disable safety checker
-                    requires_safety_checker=False,
                 ).to(device=self.device)
             else:
                 raise Exception("No CUDA or MPS device available")
-
-            # Verify pipeline components
-            logger.info("Verifying pipeline components...")
-            logger.info(f"VAE loaded: {self.pipeline.vae is not None}")
-            logger.info(f"UNet loaded: {self.pipeline.unet is not None}")
-            logger.info(f"Text Encoder loaded: {self.pipeline.text_encoder is not None}")
-            logger.info(f"Tokenizer loaded: {self.pipeline.tokenizer is not None}")
-            logger.info(f"Scheduler loaded: {self.pipeline.scheduler is not None}")
 
             logging.info("Pipeline successfully initialized")
 
@@ -89,38 +77,38 @@ class TextToImagePipeline:
     def generate(
         self,
         prompt: str,
-        callback: Optional[Callable[[diffusers.DiffusionPipeline, int, int, Dict], None]] = None,
+        callback: Optional[Callable[[int, int, torch.FloatTensor], None]] = None,
     ) -> List[PIL.Image.Image]:
         """Generate images, optionally with a step callback.
 
         Args:
             prompt (str): The text prompt for image generation.
-            callback (callable): 
+            callback (callable): diffusers uses callback(step, timestep, latents).
         """
         logging.info(f"Generate called with pipeline state: {self.pipeline is not None}")
         if self.pipeline is None:
             raise RuntimeError("Pipeline not initialized. Call start() before generate()")
 
         try:
-            # Add more detailed logging
-            logger.info(f"Pipeline scheduler type: {type(self.pipeline.scheduler)}")
-            logger.info(f"Pipeline scheduler config: {self.pipeline.scheduler.config if hasattr(self.pipeline, 'scheduler') else 'No scheduler'}")
+            # Re-instantiate the scheduler to avoid certain edge-case issues
+            if not hasattr(self.pipeline, "scheduler"):
+                raise RuntimeError("Pipeline scheduler not properly configured")
+            scheduler = self.pipeline.scheduler.from_config(self.pipeline.scheduler.config)
+            self.pipeline.scheduler = scheduler
 
-            # Remove the scheduler recreation since sd-turbo comes with its own optimized scheduler
+            # The important part: pass callback=..., callback_steps=... to get updates each step
             result = self.pipeline(
                 prompt=prompt,
                 num_inference_steps=50,
                 guidance_scale=7.5,
                 height=720,
                 width=1280,
-                callback_on_step_end=callback,
-                callback_on_step_end_tensor_inputs=[],
+                callback=callback,         # <--- THIS is the correct argument name
+                callback_steps=1,         # <--- Usually set to 1 so you get all steps
             )
             return result.images
 
         except Exception as e:
-            logger.error(f"Error during image generation: {str(e)}")
-            logger.error(f"Pipeline state: {self.pipeline}")
             raise RuntimeError(f"Error during image generation: {str(e)}") from e
 
 
@@ -246,57 +234,52 @@ class ImageResponse(BaseModel):
 
 async def stream_progress(prompt: str):
     """Coroutine that yields SSE data while generating images in background."""
+    # 1) Capture the main event loop
     loop = asyncio.get_event_loop()
     progress_queue = asyncio.Queue()
 
-    def diffusion_callback(pipe: diffusers.DiffusionPipeline, step: int, timestep: int, kwargs: Dict):
-        logger.info(f"diffusion_callback called with step: {step}, timestep: {timestep}, kwargs: {kwargs}")
-        try:
-            # Construct progress object with safe defaults
-            progress = ImageResponse(
-                created=int(datetime.now().timestamp()),
-                step=step if step is not None else 0,
-                timestep=int(timestep) if timestep is not None else 0,
-                error="",
-                completed=False,
-                data=[],  # Empty list since we don't have intermediate images
-            )
-            # Safely put it in the queue
-            loop.call_soon_threadsafe(
-                progress_queue.put_nowait,
-                progress.model_dump_json()
-            )
-        except Exception as e:
-            logger.error(f"Error in callback: {str(e)}")
-            # Don't re-raise, just log, to prevent breaking the pipeline
-
-    try:
-        # Launch generation in separate thread
-        generation_task = asyncio.create_task(
-            asyncio.to_thread(
-                shared_pipeline.generate,
-                prompt,
-                diffusion_callback
-            )
+    # 2) Define callback that runs in the *worker* thread
+    def diffusion_callback(step: int, timestep: int, latents: torch.FloatTensor):
+        # Construct your partial progress object
+        progress = ImageResponse(
+            created=int(datetime.now().timestamp()),
+            step=step,
+            timestep=timestep,
+            error="",
+            completed=False,
+            data=[],
+        )
+        # 3) Put it in the async queue using loop.call_soon_threadsafe
+        loop.call_soon_threadsafe(
+            progress_queue.put_nowait,
+            progress.model_dump_json()
         )
 
+    # 4) Launch the generation in a separate thread, so we don't block
+    generation_task = asyncio.create_task(
+        asyncio.to_thread(shared_pipeline.generate, prompt, diffusion_callback)
+    )
+
+    # 5) Continuously yield SSE events as progress messages arrive
+    try:
         while not generation_task.done():
             try:
                 progress_json = await asyncio.wait_for(progress_queue.get(), timeout=0.2)
                 yield f"data: {progress_json}\n\n"
             except asyncio.TimeoutError:
+                # No progress update yet
                 pass
-
-        # Get final images
+        
+        # 6) Once done, gather final images
         images = await generation_task
         urls = []
         for im in images:
-            _, url = save_image(im)
-            urls.append(url)  # Use the URL instead of path
+            path, _ = save_image(im)
+            urls.append(path)
 
         final_response = ImageResponse(
             created=int(datetime.now().timestamp()),
-            step=50,  # Final step
+            step=0,
             timestep=0,
             error="",
             completed=True,
@@ -305,7 +288,6 @@ async def stream_progress(prompt: str):
         yield f"data: {final_response.model_dump_json()}\n\n"
 
     except Exception as e:
-        logger.error(f"Error in stream_progress: {str(e)}")
         error_response = ImageResponse(
             created=int(datetime.now().timestamp()),
             step=0,
