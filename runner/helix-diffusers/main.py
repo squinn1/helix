@@ -50,23 +50,35 @@ class TextToImagePipeline:
             if torch.cuda.is_available():
                 logger.info("Loading CUDA")
                 self.device = "cuda"
-                self.pipeline = diffusers.AutoPipelineForText2Image.from_pretrained(
+                self.pipeline = diffusers.StableDiffusionPipeline.from_pretrained(
                     model_id,
                     torch_dtype=torch.bfloat16,
                     local_files_only=True,
                     cache_dir=cache_dir,
+                    safety_checker=None,  # Explicitly disable safety checker
+                    requires_safety_checker=False,
                 ).to(device=self.device)
             elif torch.backends.mps.is_available():
                 logger.info("Loading MPS for Mac M Series")
                 self.device = "mps"
-                self.pipeline = diffusers.AutoPipelineForText2Image.from_pretrained(
+                self.pipeline = diffusers.StableDiffusionPipeline.from_pretrained(
                     model_id,
                     torch_dtype=torch.bfloat16,
                     local_files_only=True,
                     cache_dir=cache_dir,
+                    safety_checker=None,  # Explicitly disable safety checker
+                    requires_safety_checker=False,
                 ).to(device=self.device)
             else:
                 raise Exception("No CUDA or MPS device available")
+
+            # Verify pipeline components
+            logger.info("Verifying pipeline components...")
+            logger.info(f"VAE loaded: {self.pipeline.vae is not None}")
+            logger.info(f"UNet loaded: {self.pipeline.unet is not None}")
+            logger.info(f"Text Encoder loaded: {self.pipeline.text_encoder is not None}")
+            logger.info(f"Tokenizer loaded: {self.pipeline.tokenizer is not None}")
+            logger.info(f"Scheduler loaded: {self.pipeline.scheduler is not None}")
 
             logging.info("Pipeline successfully initialized")
 
