@@ -90,9 +90,18 @@ class TextToImagePipeline:
             raise RuntimeError("Pipeline not initialized. Call start() before generate()")
 
         try:
-            # Re-instantiate the scheduler to avoid certain edge-case issues
+            # Add more detailed logging
+            logger.info(f"Pipeline scheduler type: {type(self.pipeline.scheduler)}")
+            logger.info(f"Pipeline scheduler config: {self.pipeline.scheduler.config if hasattr(self.pipeline, 'scheduler') else 'No scheduler'}")
+
+            # Check scheduler existence and configuration
             if not hasattr(self.pipeline, "scheduler"):
-                raise RuntimeError("Pipeline scheduler not properly configured")
+                raise RuntimeError("Pipeline scheduler not found")
+            if self.pipeline.scheduler is None:
+                raise RuntimeError("Pipeline scheduler is None")
+            if not hasattr(self.pipeline.scheduler, "config"):
+                raise RuntimeError("Scheduler has no config attribute")
+
             scheduler = self.pipeline.scheduler.from_config(self.pipeline.scheduler.config)
             self.pipeline.scheduler = scheduler
 
@@ -108,6 +117,8 @@ class TextToImagePipeline:
             return result.images
 
         except Exception as e:
+            logger.error(f"Error during image generation: {str(e)}")
+            logger.error(f"Pipeline state: {self.pipeline}")
             raise RuntimeError(f"Error during image generation: {str(e)}") from e
 
 
