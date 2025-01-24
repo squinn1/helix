@@ -81,5 +81,6 @@ type RunnerNatsReplyResponse struct {
 	InteractionID string
 	Progress      float64 // Percent complete 0-1.
 	DurationMs    int64
+	Error         error // Set if there was an error
 	Response      []byte
 }
