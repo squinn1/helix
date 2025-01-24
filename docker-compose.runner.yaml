@@ -8,7 +8,7 @@ services:
     volumes:
       - ~/.cache/huggingface:/root/.cache/huggingface
     ports:
-      - ${SERVER_PORT-8080}:${SERVER_PORT-8080}
+      - ${SERVER_PORT-8081}:${SERVER_PORT-8081}
       - 4222:4222
     environment:
       - LOG_LEVEL=${LOG_LEVEL-info}
