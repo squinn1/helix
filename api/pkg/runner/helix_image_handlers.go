@@ -95,6 +95,8 @@ func (s *HelixRunnerAPIServer) createHelixImageGeneration(w http.ResponseWriter,
 		image.URL = resFiles[i]
 	}
 
+	log.Trace().Interface("response", response).Msg("Image generation response")
+
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
@@ -116,7 +118,7 @@ func (s *HelixRunnerAPIServer) createHelixImageGeneration(w http.ResponseWriter,
 			return
 		}
 
-		// Convert the response to a helix ImageInferenceResponse
+		// Convert the response to a nats reply response
 		helixResponse := types.RunnerNatsReplyResponse{
 			RequestID:     req.RequestID,
 			CreatedAt:     time.Now(),

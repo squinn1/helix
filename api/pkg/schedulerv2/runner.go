@@ -222,7 +222,7 @@ func (c *RunnerController) SubmitImageGenerationRequest(slot *scheduler.Slot, se
 	}
 	resp, err := c.Send(c.ctx, slot.RunnerID, headers, &types.Request{
 		Method: "POST",
-		URL:    fmt.Sprintf("/api/v1/slots/%s/v1/images/generations", slot.ID),
+		URL:    fmt.Sprintf("/api/v1/slots/%s/v1/helix/images/generations", slot.ID),
 		Body:   string(body),
 	})
 	if err != nil {

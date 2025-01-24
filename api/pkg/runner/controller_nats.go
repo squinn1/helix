@@ -115,7 +115,6 @@ func (c *NatsController) executeTaskViaHTTP(ctx context.Context, headers nats.He
 	log.Debug().
 		Str("method", task.Method).
 		Str("url", task.URL).
-		Str("streaming", headers.Get(pubsub.StreamingHeader)).
 		Msg("executing task via HTTP")
 
 	// Parse URL for path extraction
@@ -128,7 +127,7 @@ func (c *NatsController) executeTaskViaHTTP(ctx context.Context, headers nats.He
 	// Route based on request type
 	if headers.Get(pubsub.HelixNatsReplyHeader) != "" {
 		log.Debug().Str("path", parsedURL.Path).Msg("routing to nats reply handler")
-		return c.handleNatsReplyRequest(ctx, parsedURL.Path, task)
+		return c.handleNatsReplyRequest(ctx, parsedURL.Path, task, headers.Get(pubsub.HelixNatsReplyHeader))
 	}
 
 	log.Debug().Str("path", parsedURL.Path).Msg("routing to generic HTTP handler")
@@ -175,17 +174,18 @@ func (c *NatsController) handleGenericHTTPRequest(ctx context.Context, path stri
 }
 
 // handleNatsReplyRequest processes nats reply requests
-func (c *NatsController) handleNatsReplyRequest(ctx context.Context, path string, task types.Request) *types.Response {
+func (c *NatsController) handleNatsReplyRequest(ctx context.Context, path string, task types.Request, responseQueue string) *types.Response {
 	log.Debug().
 		Str("path", path).
 		Str("method", task.Method).
-		Msg("handling LLM request")
+		Str("response_queue", responseQueue).
+		Msg("handling nats reply request")
 
-	// Parse LLM request
+	// Parse nats reply request
 	var helixRequest types.RunnerNatsReplyRequest
 	if err := json.Unmarshal([]byte(task.Body), &helixRequest); err != nil {
-		log.Error().Err(err).Msg("failed to parse LLM request")
-		return &types.Response{StatusCode: 400, Body: "Invalid LLM request format"}
+		log.Error().Err(err).Msg("failed to parse nats reply request")
+		return &types.Response{StatusCode: 400, Body: "Invalid nats reply request format"}
 	}
 
 	log.Trace().
@@ -211,7 +211,6 @@ func (c *NatsController) handleNatsReplyRequest(ctx context.Context, path string
 	defer resp.Body.Close()
 
 	// Get response queue for publishing results
-	responseQueue := pubsub.GetRunnerResponsesQueue(helixRequest.OwnerID, helixRequest.RequestID)
 	start := time.Now()
 
 	log.Trace().
@@ -272,16 +271,17 @@ func (c *NatsController) handleStreamingResponse(ctx context.Context, resp *http
 
 // handleRegularLLMResponse processes non-streaming LLM responses
 func (c *NatsController) handleRegularResponse(ctx context.Context, resp *http.Response, responseQueue string, req *types.RunnerNatsReplyRequest, start time.Time) *types.Response {
-	log.Trace().
-		Str("request_id", req.RequestID).
-		Str("response_queue", responseQueue).
-		Msg("handling regular LLM response")
-
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		log.Error().Err(err).Msg("failed to read response body")
 		return &types.Response{StatusCode: 500, Body: "Failed to read response"}
 	}
+
+	log.Trace().
+		Str("request_id", req.RequestID).
+		Str("response_queue", responseQueue).
+		Str("response", string(body)).
+		Msg("handling regular LLM response")
 
 	if err := c.publishResponse(ctx, responseQueue, req, body, start); err != nil {
 		log.Error().Err(err).Msg("failed to publish response")
