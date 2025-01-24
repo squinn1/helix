@@ -41,12 +41,16 @@ func (s *HelixRunnerAPIServer) createHelixImageGeneration(w http.ResponseWriter,
 		return
 	}
 
+	log.Trace().Str("body", string(body)).Msg("parsing nats reply request")
+
 	var req types.RunnerNatsReplyRequest
 	err = json.Unmarshal(body, &req)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+
+	log.Trace().Str("request", string(req.Request)).Msg("parsing image request")
 
 	var imageRequest openai.ImageRequest
 	err = json.Unmarshal(req.Request, &imageRequest)

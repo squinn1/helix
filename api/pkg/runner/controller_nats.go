@@ -110,7 +110,6 @@ func (c *NatsController) handler(ctx context.Context, msg *nats.Msg) error {
 	return nil
 }
 
-// executeTaskViaHTTP handles both LLM and generic HTTP requests
 func (c *NatsController) executeTaskViaHTTP(ctx context.Context, headers nats.Header, task types.Request) *types.Response {
 	log.Debug().
 		Str("method", task.Method).
@@ -269,7 +268,6 @@ func (c *NatsController) handleStreamingResponse(ctx context.Context, resp *http
 	}
 }
 
-// handleRegularLLMResponse processes non-streaming LLM responses
 func (c *NatsController) handleRegularResponse(ctx context.Context, resp *http.Response, responseQueue string, req *types.RunnerNatsReplyRequest, start time.Time) *types.Response {
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -281,7 +279,7 @@ func (c *NatsController) handleRegularResponse(ctx context.Context, resp *http.R
 		Str("request_id", req.RequestID).
 		Str("response_queue", responseQueue).
 		Str("response", string(body)).
-		Msg("handling regular LLM response")
+		Msg("handling regular nats reply response")
 
 	if err := c.publishResponse(ctx, responseQueue, req, body, start); err != nil {
 		log.Error().Err(err).Msg("failed to publish response")
@@ -300,7 +298,7 @@ func (c *NatsController) publishResponse(ctx context.Context, queue string, req 
 		Str("request_id", req.RequestID).
 		Str("queue", queue).
 		Int64("duration_ms", time.Since(start).Milliseconds()).
-		Msg("publishing LLM response")
+		Msg("publishing nats reply response")
 
 	infResponse := &types.RunnerNatsReplyResponse{
 		RequestID:     req.RequestID,
