@@ -68,66 +68,74 @@ func (s *HelixRunnerAPIServer) createHelixImageGeneration(w http.ResponseWriter,
 	// Just use the standard openai image generation for now, because I haven't implemented
 	// streaming in the python code yet.
 
-	response, err := slot.Runtime.OpenAIClient().CreateImage(r.Context(), imageRequest)
+	diffusersClient, err := NewDiffusersClient(r.Context(), slot.Runtime.URL())
 	if err != nil {
-		http.Error(w, fmt.Sprintf("failed to create image: %s", err.Error()), http.StatusInternalServerError)
+		http.Error(w, fmt.Sprintf("failed to create diffusers client: %s", err.Error()), http.StatusInternalServerError)
 		return
 	}
 
-	// Intercept the result and upload the files to the control plane
-	clientOptions := system.ClientOptions{
-		Host:  s.runnerOptions.APIHost,
-		Token: s.runnerOptions.APIToken,
-	}
-	fileHandler := NewFileHandler(s.runnerOptions.ID, clientOptions, func(response *types.RunnerTaskResponse) {
-		log.Debug().Interface("response", response).Msg("File handler event")
-	})
-	localFiles := []string{}
-	for _, image := range response.Data {
-		localFiles = append(localFiles, image.URL)
-	}
-	resFiles, err := fileHandler.uploadFiles(sessionID, localFiles, types.FilestoreResultsDir)
-	if err != nil {
-		http.Error(w, fmt.Sprintf("failed to upload files: %w", err), http.StatusInternalServerError)
-		return
-	}
-	// Overwrite the original urls with the new ones
-	inner := []openai.ImageResponseDataInner{}
-	for i, _ := range response.Data {
-		inner = append(inner, openai.ImageResponseDataInner{
-			URL: resFiles[i],
-		})
-	}
-	finalResponse := openai.ImageResponse{
-		Data: inner,
-	}
+	err = diffusersClient.GenerateStreaming(r.Context(), imageRequest.Prompt, func(update GenerationUpdate) error {
+		log.Trace().Interface("update", update).Msg("Image generation update")
+		if update.Completed {
+			// Intercept the result and upload the files to the control plane
+			clientOptions := system.ClientOptions{
+				Host:  s.runnerOptions.APIHost,
+				Token: s.runnerOptions.APIToken,
+			}
+			fileHandler := NewFileHandler(s.runnerOptions.ID, clientOptions, func(response *types.RunnerTaskResponse) {
+				log.Debug().Interface("response", response).Msg("File handler event")
+			})
+			localFiles := []string{}
+			for _, image := range update.Data {
+				localFiles = append(localFiles, image.URL)
+			}
+			resFiles, err := fileHandler.uploadFiles(sessionID, localFiles, types.FilestoreResultsDir)
+			if err != nil {
+				http.Error(w, fmt.Sprintf("failed to upload files: %w", err), http.StatusInternalServerError)
+				return err
+			}
+			// Overwrite the original urls with the new ones
+			inner := []openai.ImageResponseDataInner{}
+			for i, _ := range update.Data {
+				inner = append(inner, openai.ImageResponseDataInner{
+					URL: resFiles[i],
+				})
+			}
+			finalResponse := GenerationUpdate{
+				Created:   update.Created,
+				Step:      update.Step,
+				Timestep:  update.Timestep,
+				Error:     update.Error,
+				Completed: update.Completed,
+				Data:      inner,
+			}
+			bts, err := json.Marshal(finalResponse)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+			}
 
-	log.Trace().Interface("response", finalResponse).Msg("Image generation response")
+			if err := writeChunk(w, bts); err != nil {
+				log.Error().Msgf("failed to write completion chunk: %v", err)
+			}
+			return nil
+		}
 
-	w.Header().Set("Content-Type", "text/event-stream")
-	w.Header().Set("Cache-Control", "no-cache")
-	w.Header().Set("Connection", "keep-alive")
-
-	// Write the stream into the response
-	for {
-		// response, err := stream.Recv()
-		// if errors.Is(err, io.EOF) {
-		// break
-		// }
-		// if err != nil {
-		// 	http.Error(rw, err.Error(), http.StatusInternalServerError)
-		// 	return
-		// }
-
-		bts, err := json.Marshal(finalResponse)
+		bts, err := json.Marshal(update)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
 		}
 
 		if err := writeChunk(w, bts); err != nil {
 			log.Error().Msgf("failed to write completion chunk: %v", err)
 		}
-		break
+		return nil
+	})
+	if err != nil {
+		http.Error(w, fmt.Sprintf("failed to create image: %s", err.Error()), http.StatusInternalServerError)
+		return
 	}
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
 }

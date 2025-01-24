@@ -73,16 +73,18 @@ func (s *HelixRunnerAPIServer) createChatCompletion(rw http.ResponseWriter, r *h
 		OriginalRequest: body,
 	})
 
-	if slot.Runtime.OpenAIClient == nil {
-		log.Error().Msg("openai client not initialized, please start the runtime first")
-		http.Error(rw, "openai client not initialized, please start the runtime first", http.StatusInternalServerError)
+	// Create the openai client
+	openAIClient, err := CreateOpenaiClient(ctx, fmt.Sprintf("%s/v1", slot.Runtime.URL()))
+	if err != nil {
+		log.Error().Err(err).Msg("error creating openai client")
+		http.Error(rw, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
 	// Non-streaming request returns the response immediately
 	if !chatCompletionRequest.Stream {
 		log.Trace().Str("model", slot.Model).Msg("creating chat completion")
-		resp, err := slot.Runtime.OpenAIClient().CreateChatCompletion(ctx, chatCompletionRequest)
+		resp, err := openAIClient.CreateChatCompletion(ctx, chatCompletionRequest)
 		if err != nil {
 			log.Error().Err(err).Msg("error creating chat completion")
 			http.Error(rw, err.Error(), http.StatusInternalServerError)
@@ -112,7 +114,7 @@ func (s *HelixRunnerAPIServer) createChatCompletion(rw http.ResponseWriter, r *h
 	}
 
 	// Streaming request, receive and write the stream in chunks
-	stream, err := slot.Runtime.OpenAIClient().CreateChatCompletionStream(ctx, chatCompletionRequest)
+	stream, err := openAIClient.CreateChatCompletionStream(ctx, chatCompletionRequest)
 	if err != nil {
 		http.Error(rw, err.Error(), http.StatusInternalServerError)
 		return

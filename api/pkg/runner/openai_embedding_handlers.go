@@ -76,14 +76,16 @@ func (s *HelixRunnerAPIServer) createEmbedding(rw http.ResponseWriter, r *http.R
 		OriginalRequest: body,
 	})
 
-	if slot.Runtime.OpenAIClient == nil {
-		log.Error().Msg("openai client not initialized, please start the runtime first")
-		http.Error(rw, "openai client not initialized, please start the runtime first", http.StatusInternalServerError)
+	// Create the openai client
+	openAIClient, err := CreateOpenaiClient(ctx, fmt.Sprintf("%s/v1", slot.Runtime.URL()))
+	if err != nil {
+		log.Error().Err(err).Msg("error creating openai client")
+		http.Error(rw, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
 	log.Trace().Str("model", slot.Model).Msg("creating chat completion")
-	resp, err := slot.Runtime.OpenAIClient().CreateEmbeddings(ctx, embeddingRequest)
+	resp, err := openAIClient.CreateEmbeddings(ctx, embeddingRequest)
 	if err != nil {
 		log.Error().Err(err).Msg("error creating chat completion")
 		http.Error(rw, err.Error(), http.StatusInternalServerError)

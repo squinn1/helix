@@ -15,6 +15,9 @@ import (
 	"syscall"
 	"time"
 
+	"bufio"
+	"strings"
+
 	"github.com/helixml/helix/api/pkg/freeport"
 	"github.com/helixml/helix/api/pkg/system"
 	"github.com/helixml/helix/api/pkg/types"
@@ -28,7 +31,6 @@ var (
 
 type DiffusersRuntime struct {
 	version         string
-	openAIClient    *openai.Client
 	DiffusersClient *DiffusersClient
 	cacheDir        string
 	port            int
@@ -131,11 +133,6 @@ func (d *DiffusersRuntime) Start(ctx context.Context) error {
 	}
 	d.version = version
 
-	// Create OpenAI Client
-	config := openai.DefaultConfig("diffusers")
-	config.BaseURL = url.String() + "/v1"
-	d.openAIClient = openai.NewClientWithConfig(config)
-
 	return nil
 }
 
@@ -162,8 +159,8 @@ func (d *DiffusersRuntime) Warm(ctx context.Context, modelName string) error {
 	return d.DiffusersClient.Warm(ctx, modelName)
 }
 
-func (d *DiffusersRuntime) OpenAIClient() *openai.Client {
-	return d.openAIClient
+func (d *DiffusersRuntime) URL() string {
+	return fmt.Sprintf("http://localhost:%d", d.port)
 }
 
 func (d *DiffusersRuntime) Runtime() types.Runtime {
@@ -369,5 +366,78 @@ func (d *DiffusersClient) Warm(ctx context.Context, modelName string) error {
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("diffusers warm returned status %d", resp.StatusCode)
 	}
+	return nil
+}
+
+// Define a type for the streaming response data
+type GenerationUpdate struct {
+	Created   int64                           `json:"created"`
+	Step      float64                         `json:"step"`
+	Timestep  int                             `json:"timestep"`
+	Error     string                          `json:"error"`
+	Completed bool                            `json:"completed"`
+	Data      []openai.ImageResponseDataInner `json:"data"`
+}
+
+func (d *DiffusersClient) GenerateStreaming(ctx context.Context, prompt string, callback func(GenerationUpdate) error) error {
+	// Create request body
+	reqBody := map[string]string{"prompt": prompt}
+	body, err := json.Marshal(reqBody)
+	if err != nil {
+		return fmt.Errorf("error marshaling request: %w", err)
+	}
+
+	// Create request
+	req, err := http.NewRequestWithContext(ctx, "POST", d.url+"/helix/images/generations/stream", bytes.NewBuffer(body))
+	if err != nil {
+		return fmt.Errorf("error creating request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "text/event-stream")
+
+	resp, err := d.client.Do(req)
+	if err != nil {
+		return fmt.Errorf("error making request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("diffusers generate streaming returned status %d", resp.StatusCode)
+	}
+
+	scanner := bufio.NewScanner(resp.Body)
+	for scanner.Scan() {
+		line := scanner.Text()
+
+		// Skip empty lines or non-data lines
+		if !strings.HasPrefix(line, "data: ") {
+			continue
+		}
+
+		log.Debug().Str("line", line).Msg("Received line")
+		// Extract the JSON payload after "data: "
+		jsonData := strings.TrimPrefix(line, "data: ")
+
+		// Skip keep-alive messages
+		if jsonData == "" || jsonData == ":keep-alive" {
+			continue
+		}
+
+		// Parse the JSON update
+		var update GenerationUpdate
+		if err := json.Unmarshal([]byte(jsonData), &update); err != nil {
+			return fmt.Errorf("error parsing response: %w", err)
+		}
+
+		// Call the callback with the update
+		if err := callback(update); err != nil {
+			return fmt.Errorf("callback error: %w", err)
+		}
+	}
+
+	if err := scanner.Err(); err != nil {
+		return fmt.Errorf("error reading response: %w", err)
+	}
+
 	return nil
 }

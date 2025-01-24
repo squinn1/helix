@@ -26,7 +26,6 @@ var (
 
 type OllamaRuntime struct {
 	version      string
-	openAIClient *openai.Client
 	cacheDir     string
 	port         int
 	startTimeout time.Duration
@@ -149,13 +148,11 @@ func (i *OllamaRuntime) Start(ctx context.Context) error {
 	}
 	i.version = version
 
-	// Create the openai client
-	i.openAIClient, err = CreateOpenaiClient(ctx, fmt.Sprintf("http://localhost:%d/v1", i.port))
-	if err != nil {
-		return fmt.Errorf("error creating openai client: %w", err)
-	}
-
 	return nil
+}
+
+func (i *OllamaRuntime) URL() string {
+	return fmt.Sprintf("http://localhost:%d", i.port)
 }
 
 func (i *OllamaRuntime) Stop() error {
@@ -221,10 +218,6 @@ func (i *OllamaRuntime) Warm(ctx context.Context, model string) error {
 		}
 	}
 	return err
-}
-
-func (i *OllamaRuntime) OpenAIClient() *openai.Client {
-	return i.openAIClient
 }
 
 func (i *OllamaRuntime) Runtime() types.Runtime {

@@ -31,13 +31,15 @@ func (s *HelixRunnerAPIServer) listModels(rw http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	if slot.Runtime.OpenAIClient == nil {
-		log.Error().Msg("openai client not initialized, please start the runtime first")
-		http.Error(rw, "openai client not initialized, please start the runtime first", http.StatusInternalServerError)
+	// Create the openai client
+	openAIClient, err := CreateOpenaiClient(r.Context(), fmt.Sprintf("%s/v1", slot.Runtime.URL()))
+	if err != nil {
+		log.Error().Err(err).Msg("error creating openai client")
+		http.Error(rw, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	resp, err := slot.Runtime.OpenAIClient().ListModels(r.Context())
+	resp, err := openAIClient.ListModels(r.Context())
 	if err != nil {
 		http.Error(rw, err.Error(), http.StatusInternalServerError)
 		return

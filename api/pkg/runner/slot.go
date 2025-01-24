@@ -26,9 +26,9 @@ type Runtime interface {
 	Stop() error
 	PullModel(ctx context.Context, model string, progress func(PullProgress) error) error
 	Warm(ctx context.Context, model string) error
-	OpenAIClient() *openai.Client
 	Version() string
 	Runtime() types.Runtime
+	URL() string
 }
 
 type CreateSlotParams struct {
@@ -66,8 +66,12 @@ func CreateSlot(ctx context.Context, params CreateSlotParams) (*Slot, error) {
 		return nil, err
 	}
 
+	// Create OpenAI Client
+	openAIClient := openai.NewClientWithConfig(openai.ClientConfig{
+		BaseURL: r.URL() + "/v1",
+	})
 	// Check that the model is available in this runtime
-	models, err := r.OpenAIClient().ListModels(ctx)
+	models, err := openAIClient.ListModels(ctx)
 	if err != nil {
 		return nil, err
 	}
