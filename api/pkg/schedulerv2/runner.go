@@ -185,13 +185,13 @@ func (c *RunnerController) SubmitImageGenerationRequest(slot *scheduler.Slot, se
 	// user interactions into a single prompt. Fingers crossed there's no limits.
 	// Merge the user interactions into a single prompt
 	prompt := strings.Builder{}
-	prompt.WriteString("You are a helpful assistant that can generate images based on user interactions. Here are the previous interactions:\n\n")
+	prompt.WriteString("You are a helpful assistant that can generate images based on user interactions. Here are the previous interactions:\n")
 	for _, interaction := range userInteractions[:len(userInteractions)-1] {
 		prompt.WriteString(interaction.Message)
 		prompt.WriteString("\n")
 	}
-	prompt.WriteString("Here is the current interaction:\n\n")
-	prompt.WriteString(lastInteraction.Message)
+	prompt.WriteString("Here is the current interaction:\n")
+	prompt.WriteString(userInteractions[len(userInteractions)-1].Message)
 
 	// Convert the session to a valid image generation request
 	imageRequest := openai.ImageRequest{

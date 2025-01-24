@@ -916,28 +916,23 @@ func (c *Controller) AddSessionToQueue(session *types.Session) error {
 					InteractionID: lastInteraction.ID,
 					Owner:         session.Owner,
 					WorkerTaskResponse: &types.RunnerTaskResponse{
-						Type:     types.WorkerTaskResponseTypeResult,
-						Done:     true,
-						Status:   "done",
-						Progress: 100,
-						Files:    files,
+						SessionID:     session.ID,
+						InteractionID: lastInteraction.ID,
+						Owner:         session.Owner,
+						Type:          types.WorkerTaskResponseTypeResult,
+						Done:          true,
+						Status:        "done",
+						Progress:      100,
+						Files:         files,
 					},
 				}
 			} else {
 				return fmt.Errorf("unsupported session mode or type: %s %s", session.Mode, session.Type)
 			}
 
-			log.Trace().Interface("taskResponse", taskResponse).Str("queue", pubsub.GetSessionQueue(session.Owner, session.ID)).Msg("publishing the task response")
-
-			messageBytes, err := json.Marshal(taskResponse)
+			_, err = c.HandleRunnerResponse(c.Ctx, taskResponse.WorkerTaskResponse)
 			if err != nil {
-				return fmt.Errorf("error marshalling task response: %w", err)
-			}
-
-			// Republish to old session handler queues
-			err = c.Options.PubSub.Publish(c.Ctx, pubsub.GetSessionQueue(session.Owner, session.ID), messageBytes)
-			if err != nil {
-				log.Error().Msgf("Error publishing session update: %s", err.Error())
+				return fmt.Errorf("error handling runner response: %w", err)
 			}
 
 			return nil
