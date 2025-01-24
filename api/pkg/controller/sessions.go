@@ -888,7 +888,7 @@ func (c *Controller) AddSessionToQueue(session *types.Session) error {
 				return fmt.Errorf("runner error: %w", runnerResp.Error)
 			}
 
-			var taskResponse types.RunnerTaskResponse
+			var taskResponse types.WebsocketEvent
 
 			if session.Mode == types.SessionModeInference && session.Type == types.SessionTypeImage {
 
@@ -910,15 +910,18 @@ func (c *Controller) AddSessionToQueue(session *types.Session) error {
 				}
 
 				// Convert nw Nats response types to old session handler types
-				taskResponse = types.RunnerTaskResponse{
-					Type:          types.WorkerTaskResponseTypeResult,
+				taskResponse = types.WebsocketEvent{
+					Type:          types.WebsocketEventWorkerTaskResponse,
 					SessionID:     session.ID,
 					InteractionID: lastInteraction.ID,
 					Owner:         session.Owner,
-					Done:          true,
-					Status:        "done",
-					Progress:      100,
-					Files:         files,
+					WorkerTaskResponse: &types.RunnerTaskResponse{
+						Type:     types.WorkerTaskResponseTypeResult,
+						Done:     true,
+						Status:   "done",
+						Progress: 100,
+						Files:    files,
+					},
 				}
 			} else {
 				return fmt.Errorf("unsupported session mode or type: %s %s", session.Mode, session.Type)
