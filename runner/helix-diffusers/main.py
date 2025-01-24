@@ -225,7 +225,7 @@ class ImageResponseDataInner(BaseModel):
 
 class ImageResponse(BaseModel):
     created: int
-    step: float
+    step: int
     timestep: int
     error: str
     completed: bool
