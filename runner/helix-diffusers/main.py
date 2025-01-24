@@ -196,6 +196,7 @@ async def generate_image(image_input: TextToImageInput):
         if shared_pipeline.pipeline is None:
             raise RuntimeError("Pipeline not initialized. Please try again in a few moments.")
 
+        logger.info(f"generate_image called with prompt: {image_input.prompt}")
         loop = asyncio.get_running_loop()
         output = await loop.run_in_executor(
             None, lambda: shared_pipeline.generate(image_input.prompt)

@@ -70,7 +70,7 @@ func (s *HelixRunnerAPIServer) createHelixImageGeneration(w http.ResponseWriter,
 
 	response, err := slot.Runtime.OpenAIClient().CreateImage(r.Context(), imageRequest)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		http.Error(w, fmt.Sprintf("failed to create image: %w", err), http.StatusInternalServerError)
 		return
 	}
 
