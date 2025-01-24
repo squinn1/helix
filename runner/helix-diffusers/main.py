@@ -209,7 +209,6 @@ async def generate_image(image_input: TextToImageInput):
             detail=f"{str(e)}\nTraceback (most recent call last):\n{traceback.format_exc()}",
         )
 
-
 if __name__ == "__main__":
     import uvicorn
 

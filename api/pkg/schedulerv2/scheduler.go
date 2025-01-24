@@ -338,7 +338,20 @@ func (s *Scheduler) AllocateSlot(slotID uuid.UUID, req *scheduler.Workload) erro
 			log.Error().Err(err).Msg("error submitting chat completion request")
 		}
 	case scheduler.WorkloadTypeSession:
-		panic("not implemented")
+		switch req.Session().Mode {
+		case types.SessionModeInference:
+			switch req.Session().Type {
+			case types.SessionTypeImage:
+				err := s.controller.SubmitImageGenerationRequest(slot, req.Session())
+				if err != nil {
+					log.Error().Err(err).Msg("error submitting text2image request")
+				}
+			default:
+				panic(fmt.Sprintf("not implemented: %s", req.Session().Type))
+			}
+		default:
+			panic(fmt.Sprintf("not implemented: %s", req.Session().Mode))
+		}
 	}
 	slot.Release()
 

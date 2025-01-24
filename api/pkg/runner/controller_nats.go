@@ -16,7 +16,6 @@ import (
 	"github.com/helixml/helix/api/pkg/types"
 	"github.com/nats-io/nats.go"
 	"github.com/rs/zerolog/log"
-	openai "github.com/sashabaranov/go-openai"
 )
 
 type NatsControllerConfig struct {
@@ -116,7 +115,7 @@ func (c *NatsController) executeTaskViaHTTP(ctx context.Context, headers nats.He
 	log.Debug().
 		Str("method", task.Method).
 		Str("url", task.URL).
-		Str("body_type", headers.Get(pubsub.BodyTypeHeader)).
+		Str("streaming", headers.Get(pubsub.StreamingHeader)).
 		Msg("executing task via HTTP")
 
 	// Parse URL for path extraction
@@ -127,10 +126,11 @@ func (c *NatsController) executeTaskViaHTTP(ctx context.Context, headers nats.He
 	}
 
 	// Route based on request type
-	if headers.Get(pubsub.BodyTypeHeader) == pubsub.BodyTypeLLMInferenceRequest {
-		log.Debug().Str("path", parsedURL.Path).Msg("routing to LLM handler")
-		return c.handleLLMRequest(ctx, parsedURL.Path, task)
+	if headers.Get(pubsub.HelixNatsReplyHeader) != "" {
+		log.Debug().Str("path", parsedURL.Path).Msg("routing to nats reply handler")
+		return c.handleNatsReplyRequest(ctx, parsedURL.Path, task)
 	}
+
 	log.Debug().Str("path", parsedURL.Path).Msg("routing to generic HTTP handler")
 	return c.handleGenericHTTPRequest(ctx, parsedURL.Path, task)
 }
@@ -174,29 +174,29 @@ func (c *NatsController) handleGenericHTTPRequest(ctx context.Context, path stri
 	}
 }
 
-// handleLLMRequest processes LLM inference requests
-func (c *NatsController) handleLLMRequest(ctx context.Context, path string, task types.Request) *types.Response {
+// handleNatsReplyRequest processes nats reply requests
+func (c *NatsController) handleNatsReplyRequest(ctx context.Context, path string, task types.Request) *types.Response {
 	log.Debug().
 		Str("path", path).
 		Str("method", task.Method).
 		Msg("handling LLM request")
 
 	// Parse LLM request
-	var llmReq types.RunnerLLMInferenceRequest
-	if err := json.Unmarshal([]byte(task.Body), &llmReq); err != nil {
+	var helixRequest types.RunnerNatsReplyRequest
+	if err := json.Unmarshal([]byte(task.Body), &helixRequest); err != nil {
 		log.Error().Err(err).Msg("failed to parse LLM request")
 		return &types.Response{StatusCode: 400, Body: "Invalid LLM request format"}
 	}
 
 	log.Trace().
-		Str("request_id", llmReq.RequestID).
-		Str("owner_id", llmReq.OwnerID).
-		Str("session_id", llmReq.SessionID).
+		Str("request_id", helixRequest.RequestID).
+		Str("owner_id", helixRequest.OwnerID).
+		Str("session_id", helixRequest.SessionID).
 		Msg("parsed LLM request")
 
 	// Create HTTP request
 	var body bytes.Buffer
-	if err := json.NewEncoder(&body).Encode(llmReq.Request); err != nil {
+	if err := json.NewEncoder(&body).Encode(helixRequest.Request); err != nil {
 		log.Error().Err(err).Msg("failed to encode LLM request body")
 		return &types.Response{StatusCode: 500, Body: "Failed to encode request"}
 	}
@@ -217,7 +217,7 @@ func (c *NatsController) handleLLMRequest(ctx context.Context, path string, task
 	defer resp.Body.Close()
 
 	// Get response queue for publishing results
-	responseQueue := pubsub.GetRunnerResponsesQueue(llmReq.OwnerID, llmReq.RequestID)
+	responseQueue := pubsub.GetRunnerResponsesQueue(helixRequest.OwnerID, helixRequest.RequestID)
 	start := time.Now()
 
 	log.Trace().
@@ -228,16 +228,16 @@ func (c *NatsController) handleLLMRequest(ctx context.Context, path string, task
 	// Handle streaming vs non-streaming responses
 	if strings.Contains(resp.Header.Get("Content-Type"), "text/event-stream") {
 		log.Debug().Msg("handling streaming LLM response")
-		return c.handleStreamingLLMResponse(ctx, resp, responseQueue, &llmReq, start)
+		return c.handleStreamingResponse(ctx, resp, responseQueue, &helixRequest, start)
 	}
 	log.Debug().Msg("handling regular LLM response")
-	return c.handleRegularLLMResponse(ctx, resp, responseQueue, &llmReq, start)
+	return c.handleRegularResponse(ctx, resp, responseQueue, &helixRequest, start)
 }
 
 // handleStreamingLLMResponse processes streaming LLM responses
-func (c *NatsController) handleStreamingLLMResponse(ctx context.Context, resp *http.Response, responseQueue string, llmReq *types.RunnerLLMInferenceRequest, start time.Time) *types.Response {
+func (c *NatsController) handleStreamingResponse(ctx context.Context, resp *http.Response, responseQueue string, req *types.RunnerNatsReplyRequest, start time.Time) *types.Response {
 	log.Debug().
-		Str("request_id", llmReq.RequestID).
+		Str("request_id", req.RequestID).
 		Str("response_queue", responseQueue).
 		Msg("starting stream processing")
 
@@ -270,21 +270,7 @@ func (c *NatsController) handleStreamingLLMResponse(ctx context.Context, resp *h
 				Str("chunk", string(chunk)).
 				Msg("processing stream chunk")
 
-			// Parse SSE format
-			chunk = bytes.TrimSpace(bytes.TrimPrefix(chunk, []byte("data: ")))
-
-			// Parse OpenAI response
-			var streamResp openai.ChatCompletionStreamResponse
-			if err := json.Unmarshal(chunk, &streamResp); err != nil {
-				log.Error().Err(err).Msg("failed to parse stream chunk")
-				continue
-			}
-
-			log.Trace().
-				Str("finish_reason", string(streamResp.Choices[0].FinishReason)).
-				Msg("parsed stream response")
-
-			if err := c.publishLLMResponse(ctx, responseQueue, &streamResp, nil, llmReq, start); err != nil {
+			if err := c.publishResponse(ctx, responseQueue, req, chunk, start); err != nil {
 				log.Error().Err(err).Msg("failed to publish response")
 			}
 		}
@@ -292,9 +278,9 @@ func (c *NatsController) handleStreamingLLMResponse(ctx context.Context, resp *h
 }
 
 // handleRegularLLMResponse processes non-streaming LLM responses
-func (c *NatsController) handleRegularLLMResponse(ctx context.Context, resp *http.Response, responseQueue string, llmReq *types.RunnerLLMInferenceRequest, start time.Time) *types.Response {
+func (c *NatsController) handleRegularResponse(ctx context.Context, resp *http.Response, responseQueue string, req *types.RunnerNatsReplyRequest, start time.Time) *types.Response {
 	log.Trace().
-		Str("request_id", llmReq.RequestID).
+		Str("request_id", req.RequestID).
 		Str("response_queue", responseQueue).
 		Msg("handling regular LLM response")
 
@@ -304,17 +290,7 @@ func (c *NatsController) handleRegularLLMResponse(ctx context.Context, resp *htt
 		return &types.Response{StatusCode: 500, Body: "Failed to read response"}
 	}
 
-	var chatResp openai.ChatCompletionResponse
-	if err := json.Unmarshal(body, &chatResp); err != nil {
-		log.Error().Err(err).Msg("failed to parse response")
-		return &types.Response{StatusCode: 500, Body: "Invalid response format"}
-	}
-
-	log.Trace().
-		Str("finish_reason", string(chatResp.Choices[0].FinishReason)).
-		Msg("parsed chat response")
-
-	if err := c.publishLLMResponse(ctx, responseQueue, nil, &chatResp, llmReq, start); err != nil {
+	if err := c.publishResponse(ctx, responseQueue, req, body, start); err != nil {
 		log.Error().Err(err).Msg("failed to publish response")
 		return &types.Response{StatusCode: 500, Body: "Failed to publish response"}
 	}
@@ -325,35 +301,22 @@ func (c *NatsController) handleRegularLLMResponse(ctx context.Context, resp *htt
 	}
 }
 
-// publishLLMResponse publishes LLM responses to NATS
-func (c *NatsController) publishLLMResponse(ctx context.Context, queue string, streamResp *openai.ChatCompletionStreamResponse, resp *openai.ChatCompletionResponse, req *types.RunnerLLMInferenceRequest, start time.Time) error {
-	var done bool
-	if streamResp != nil {
-		done = streamResp.Choices[0].FinishReason != ""
-	} else if resp != nil {
-		done = resp.Choices[0].FinishReason != ""
-	}
-
+// publishResponse publishes responses to NATS
+func (c *NatsController) publishResponse(ctx context.Context, queue string, req *types.RunnerNatsReplyRequest, resp []byte, start time.Time) error {
 	log.Trace().
 		Str("request_id", req.RequestID).
 		Str("queue", queue).
-		Bool("done", done).
 		Int64("duration_ms", time.Since(start).Milliseconds()).
 		Msg("publishing LLM response")
 
-	infResponse := &types.RunnerLLMInferenceResponse{
+	infResponse := &types.RunnerNatsReplyResponse{
 		RequestID:     req.RequestID,
+		CreatedAt:     time.Now(),
 		OwnerID:       req.OwnerID,
 		SessionID:     req.SessionID,
 		InteractionID: req.InteractionID,
 		DurationMs:    time.Since(start).Milliseconds(),
-		Done:          done,
-	}
-
-	if streamResp != nil {
-		infResponse.StreamResponse = streamResp
-	} else {
-		infResponse.Response = resp
+		Response:      resp,
 	}
 
 	respData, err := json.Marshal(infResponse)

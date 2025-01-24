@@ -6,14 +6,17 @@ import (
 	"fmt"
 	"net/http"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 
+	"github.com/helixml/helix/api/pkg/data"
 	"github.com/helixml/helix/api/pkg/pubsub"
 	"github.com/helixml/helix/api/pkg/scheduler"
 	"github.com/helixml/helix/api/pkg/types"
 	"github.com/nats-io/nats.go"
 	"github.com/rs/zerolog/log"
+	openai "github.com/sashabaranov/go-openai"
 )
 
 type RunnerController struct {
@@ -133,7 +136,7 @@ func (c *RunnerController) Slots(runnerID string) ([]types.RunnerSlot, error) {
 
 func (c *RunnerController) SubmitChatCompletionRequest(slot *scheduler.Slot, req *types.RunnerLLMInferenceRequest) error {
 	headers := map[string]string{}
-	headers[pubsub.BodyTypeHeader] = pubsub.BodyTypeLLMInferenceRequest
+	headers[pubsub.HelixNatsReplyHeader] = pubsub.GetRunnerResponsesQueue(req.OwnerID, req.RequestID)
 
 	body, err := json.Marshal(req)
 	if err != nil {
@@ -149,6 +152,71 @@ func (c *RunnerController) SubmitChatCompletionRequest(slot *scheduler.Slot, req
 	}
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("error submitting chat completion request: %s", resp.Body)
+	}
+
+	return nil
+}
+
+func (c *RunnerController) SubmitImageGenerationRequest(slot *scheduler.Slot, session *types.Session) error {
+	lastInteractions := data.GetLastInteractions(session, 1)
+	if len(lastInteractions) == 0 {
+		return fmt.Errorf("no last interaction found")
+	}
+
+	userInteractions := data.FilterUserInteractions(session.Interactions)
+	if len(userInteractions) == 0 {
+		return fmt.Errorf("no user interaction found")
+	}
+
+	// Note that there's no system prompt in the openai api. So I'm just going to merge the previous
+	// user interactions into a single prompt. Fingers crossed there's no limits.
+	// Merge the user interactions into a single prompt
+	prompt := strings.Builder{}
+	prompt.WriteString("You are a helpful assistant that can generate images based on user interactions. Here are the previous interactions:\n\n")
+	for _, interaction := range userInteractions[:len(userInteractions)-1] {
+		prompt.WriteString(interaction.Message)
+		prompt.WriteString("\n")
+	}
+	prompt.WriteString("Here is the current interaction:\n\n")
+	prompt.WriteString(lastInteractions[0].Message)
+
+	// Convert the session to a valid image generation request
+	imageRequest := openai.ImageRequest{
+		Prompt: prompt.String(),
+		Model:  session.ModelName,
+		N:      1,
+		User:   session.Owner,
+	}
+	requestBytes, err := json.Marshal(imageRequest)
+	if err != nil {
+		return err
+	}
+	req := &types.RunnerNatsReplyRequest{
+		RequestID:     lastInteractions[0].ID, // Use the last interaction ID as the request ID for sessions, it's important that this kept in sync with the receiver code
+		CreatedAt:     time.Now(),
+		OwnerID:       session.Owner,
+		SessionID:     session.ID,
+		InteractionID: lastInteractions[0].ID,
+		Request:       requestBytes,
+	}
+
+	headers := map[string]string{}
+	headers[pubsub.HelixNatsReplyHeader] = pubsub.GetRunnerResponsesQueue(req.OwnerID, req.RequestID)
+
+	body, err := json.Marshal(req)
+	if err != nil {
+		return err
+	}
+	resp, err := c.Send(c.ctx, slot.RunnerID, headers, &types.Request{
+		Method: "POST",
+		URL:    fmt.Sprintf("/api/v1/slots/%s/v1/images/generations", slot.ID),
+		Body:   string(body),
+	})
+	if err != nil {
+		return err
+	}
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("error submitting image generation request: %s", resp.Body)
 	}
 
 	return nil
