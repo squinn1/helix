@@ -220,10 +220,10 @@ async def stream_progress(prompt: str):
             completed=False,
             data=[],
         )
-        # Put the progress update in the queue
-        asyncio.run_coroutine_threadsafe(
-            progress_queue.put(progress.model_dump_json()),
-            asyncio.get_event_loop()
+        # Get the current event loop and use it to put the progress update in the queue
+        loop = asyncio.get_running_loop()
+        loop.call_soon_threadsafe(
+            lambda: asyncio.create_task(progress_queue.put(progress.model_dump_json()))
         )
         return callback_kwargs
 
@@ -248,7 +248,7 @@ async def stream_progress(prompt: str):
 
         # Get and process final result
         images = await generation_task
-        urls = [save_image(image)[0] for image in images]
+        urls = [save_image(image)[1] for image in images]  # Use [1] to get the URL instead of path
         
         final_response = ImageResponse(
             created=int(datetime.now().timestamp()),
@@ -261,7 +261,15 @@ async def stream_progress(prompt: str):
         yield f"data: {final_response.model_dump_json()}\n\n"
 
     except Exception as e:
-        yield f"data: {{'error': '{str(e)}'}}\n\n"
+        error_response = ImageResponse(
+            created=int(datetime.now().timestamp()),
+            data=[],
+            completed=True,
+            error=str(e),
+            step=0,
+            timestep=0,
+        )
+        yield f"data: {error_response.model_dump_json()}\n\n"
 
 @app.post("/v1/images/generations/stream")
 async def generate_image_stream(image_input: TextToImageInput):
