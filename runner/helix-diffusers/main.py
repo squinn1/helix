@@ -210,7 +210,7 @@ class ImageResponse(BaseModel):
 async def stream_progress(prompt: str):
     progress_queue = asyncio.Queue()
 
-    def callback_fn(step: int, timestep: int, callback_kwargs: Dict) -> None:
+    def callback_fn(pipeline: diffusers.Pipeline, step: int, timestep: int, callback_kwargs: Dict) -> None:
         progress = ImageResponse(
             created=datetime.now().timestamp(),
             step=step,
