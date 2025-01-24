@@ -212,7 +212,7 @@ async def stream_progress(prompt: str):
 
     def callback_fn(pipeline: diffusers.DiffusionPipeline, step: int, timestep: int, callback_kwargs: Dict) -> None:
         progress = ImageResponse(
-            created=datetime.now().timestamp(),
+            created=int(datetime.now().timestamp()),
             step=step,
             timestep=timestep,
             error="",
