@@ -92,11 +92,17 @@ func (s *HelixRunnerAPIServer) createHelixImageGeneration(w http.ResponseWriter,
 		return
 	}
 	// Overwrite the original urls with the new ones
-	for i, image := range response.Data {
-		image.URL = resFiles[i]
+	inner := []openai.ImageResponseDataInner{}
+	for i, _ := range response.Data {
+		inner = append(inner, openai.ImageResponseDataInner{
+			URL: resFiles[i],
+		})
+	}
+	finalResponse := openai.ImageResponse{
+		Data: inner,
 	}
 
-	log.Trace().Interface("response", response).Msg("Image generation response")
+	log.Trace().Interface("response", finalResponse).Msg("Image generation response")
 
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
@@ -113,7 +119,7 @@ func (s *HelixRunnerAPIServer) createHelixImageGeneration(w http.ResponseWriter,
 		// 	return
 		// }
 
-		bts, err := json.Marshal(response)
+		bts, err := json.Marshal(finalResponse)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return

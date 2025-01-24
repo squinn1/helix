@@ -874,13 +874,15 @@ func (c *Controller) AddSessionToQueue(session *types.Session) error {
 		}
 		// Create a pubsub subscription to listen for responses to this session
 		sub, err := c.Options.PubSub.Subscribe(c.Ctx, pubsub.GetRunnerResponsesQueue(session.Owner, lastInteraction.ID), func(payload []byte) error {
-			log.Debug().Str("owner", session.Owner).Str("request_id", lastInteraction.ID).Msg("received runner response, closing channel")
+			log.Debug().Str("owner", session.Owner).Str("request_id", lastInteraction.ID).Msg("received runner response")
 
 			var runnerResp types.RunnerNatsReplyResponse
 			err := json.Unmarshal(payload, &runnerResp)
 			if err != nil {
 				return fmt.Errorf("error unmarshalling runner response: %w", err)
 			}
+
+			log.Debug().Interface("runnerResp", runnerResp).Msg("runner response")
 
 			if runnerResp.Error != nil {
 				return fmt.Errorf("runner error: %w", runnerResp.Error)
@@ -889,9 +891,15 @@ func (c *Controller) AddSessionToQueue(session *types.Session) error {
 			var taskResponse types.RunnerTaskResponse
 
 			if session.Mode == types.SessionModeInference && session.Type == types.SessionTypeImage {
+
+				// TODO(Phil): Temporary logic before we implement proper streaming.
+
+				// Remove the SSE "data: " prefix from the response
+				response := strings.TrimPrefix(string(runnerResp.Response), "data: ")
+
 				// Parse the openai response
 				var openaiResponse openai.ImageResponse
-				err = json.Unmarshal(runnerResp.Response, &openaiResponse)
+				err = json.Unmarshal([]byte(response), &openaiResponse)
 				if err != nil {
 					return fmt.Errorf("error unmarshalling openai response: %w", err)
 				}
@@ -915,6 +923,8 @@ func (c *Controller) AddSessionToQueue(session *types.Session) error {
 			} else {
 				return fmt.Errorf("unsupported session mode or type: %s %s", session.Mode, session.Type)
 			}
+
+			log.Trace().Interface("taskResponse", taskResponse).Str("queue", pubsub.GetSessionQueue(session.Owner, session.ID)).Msg("publishing the task response")
 
 			messageBytes, err := json.Marshal(taskResponse)
 			if err != nil {
