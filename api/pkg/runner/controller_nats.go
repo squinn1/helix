@@ -111,37 +111,25 @@ func (c *NatsController) handler(ctx context.Context, msg *nats.Msg) error {
 }
 
 func (c *NatsController) executeTaskViaHTTP(ctx context.Context, headers nats.Header, task types.Request) *types.Response {
-	log.Debug().
-		Str("method", task.Method).
-		Str("url", task.URL).
-		Msg("executing task via HTTP")
+	// Route based on request type
+	if headers.Get(pubsub.HelixNatsReplyHeader) != "" {
+		log.Debug().Str("method", task.Method).Str("url", task.URL).Msg("routing to nats reply handler")
+		return c.handleNatsReplyRequest(ctx, task, headers.Get(pubsub.HelixNatsReplyHeader))
+	}
 
-	// Parse URL for path extraction
-	parsedURL, err := url.Parse(task.URL)
+	log.Debug().Str("method", task.Method).Str("url", task.URL).Msg("routing to generic reply handler")
+	return c.handleGenericHTTPRequest(ctx, task)
+}
+
+// handleGenericHTTPRequest processes standard HTTP requests
+func (c *NatsController) handleGenericHTTPRequest(ctx context.Context, task types.Request) *types.Response {
+	url, err := url.Parse(task.URL)
 	if err != nil {
 		log.Error().Err(err).Str("url", task.URL).Msg("failed to parse URL")
 		return &types.Response{StatusCode: 400, Body: "Unable to parse request URL"}
 	}
 
-	// Route based on request type
-	if headers.Get(pubsub.HelixNatsReplyHeader) != "" {
-		log.Debug().Str("path", parsedURL.Path).Msg("routing to nats reply handler")
-		return c.handleNatsReplyRequest(ctx, parsedURL.Path, task, headers.Get(pubsub.HelixNatsReplyHeader))
-	}
-
-	log.Debug().Str("path", parsedURL.Path).Msg("routing to generic HTTP handler")
-	return c.handleGenericHTTPRequest(ctx, parsedURL.Path, task)
-}
-
-// handleGenericHTTPRequest processes standard HTTP requests
-func (c *NatsController) handleGenericHTTPRequest(ctx context.Context, path string, task types.Request) *types.Response {
-	log.Trace().
-		Str("path", path).
-		Str("method", task.Method).
-		Int("body_size", len(task.Body)).
-		Msg("handling generic HTTP request")
-
-	req, err := http.NewRequestWithContext(ctx, task.Method, c.serverURL+path, bytes.NewBuffer([]byte(task.Body)))
+	req, err := http.NewRequestWithContext(ctx, task.Method, c.serverURL+url.Path, bytes.NewBuffer([]byte(task.Body)))
 	if err != nil {
 		log.Error().Err(err).Msg("failed to create HTTP request")
 		return &types.Response{StatusCode: 500, Body: "Failed to create request"}
@@ -173,12 +161,12 @@ func (c *NatsController) handleGenericHTTPRequest(ctx context.Context, path stri
 }
 
 // handleNatsReplyRequest processes nats reply requests
-func (c *NatsController) handleNatsReplyRequest(ctx context.Context, path string, task types.Request, responseQueue string) *types.Response {
-	log.Debug().
-		Str("path", path).
-		Str("method", task.Method).
-		Str("response_queue", responseQueue).
-		Msg("handling nats reply request")
+func (c *NatsController) handleNatsReplyRequest(ctx context.Context, task types.Request, responseQueue string) *types.Response {
+	url, err := url.Parse(task.URL)
+	if err != nil {
+		log.Error().Err(err).Str("url", task.URL).Msg("failed to parse URL")
+		return &types.Response{StatusCode: 400, Body: "Unable to parse request URL"}
+	}
 
 	// Parse nats reply request
 	var helixRequest types.RunnerNatsReplyRequest
@@ -191,10 +179,11 @@ func (c *NatsController) handleNatsReplyRequest(ctx context.Context, path string
 		Str("request_id", helixRequest.RequestID).
 		Str("owner_id", helixRequest.OwnerID).
 		Str("session_id", helixRequest.SessionID).
+		Str("request", string(helixRequest.Request)).
 		Msg("parsed nats reply request")
 
 	// Create HTTP request
-	req, err := http.NewRequestWithContext(ctx, task.Method, c.serverURL+path, bytes.NewReader(helixRequest.Request))
+	req, err := http.NewRequestWithContext(ctx, task.Method, c.serverURL+url.Path, bytes.NewReader(helixRequest.Request))
 	if err != nil {
 		log.Error().Err(err).Msg("failed to create nats reply HTTP request")
 		return &types.Response{StatusCode: 500, Body: "Failed to create request"}
