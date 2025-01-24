@@ -250,7 +250,7 @@ async def stream_progress(prompt: str):
         
         final_response = ImageResponse(
             created=int(datetime.now().timestamp()),
-            data=[ImageResponseDataInner(url=url) for url in urls],
+            data=[ImageResponseDataInner(url=url, b64_json="", revised_prompt="") for url in urls],
             completed=True,
             error="",
         )
