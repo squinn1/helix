@@ -19,7 +19,7 @@ services:
       - ALLOW_MULTIPLE_COPIES=true
       - RUNNER_WARMUP_MODELS=${RUNNER_WARMUP_MODELS-llama3:instruct}
       - SERVER_HOST=${SERVER_HOST-0.0.0.0}
-      - SERVER_PORT=${SERVER_PORT-8080}
+      - SERVER_PORT=${SERVER_PORT-8081}
       - CACHE_DIR=${CACHE_DIR-/root/.cache/huggingface}
     env_file:
       - .env
