@@ -274,8 +274,8 @@ async def stream_progress(prompt: str):
         images = await generation_task
         urls = []
         for im in images:
-            _, url = save_image(im)
-            urls.append(url)
+            path, _ = save_image(im)
+            urls.append(path)
 
         final_response = ImageResponse(
             created=int(datetime.now().timestamp()),
