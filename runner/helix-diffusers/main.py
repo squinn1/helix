@@ -94,18 +94,7 @@ class TextToImagePipeline:
             logger.info(f"Pipeline scheduler type: {type(self.pipeline.scheduler)}")
             logger.info(f"Pipeline scheduler config: {self.pipeline.scheduler.config if hasattr(self.pipeline, 'scheduler') else 'No scheduler'}")
 
-            # Check scheduler existence and configuration
-            if not hasattr(self.pipeline, "scheduler"):
-                raise RuntimeError("Pipeline scheduler not found")
-            if self.pipeline.scheduler is None:
-                raise RuntimeError("Pipeline scheduler is None")
-            if not hasattr(self.pipeline.scheduler, "config"):
-                raise RuntimeError("Scheduler has no config attribute")
-
-            scheduler = self.pipeline.scheduler.from_config(self.pipeline.scheduler.config)
-            self.pipeline.scheduler = scheduler
-
-            # The important part: pass callback=..., callback_steps=... to get updates each step
+            # Remove the scheduler recreation since sd-turbo comes with its own optimized scheduler
             result = self.pipeline(
                 prompt=prompt,
                 num_inference_steps=50,
