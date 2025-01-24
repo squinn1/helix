@@ -378,11 +378,18 @@ type GenerationUpdate struct {
 	Completed bool                            `json:"completed"`
 	Data      []openai.ImageResponseDataInner `json:"data"`
 }
+type GenerateStreamingRequest struct {
+	Model  string `json:"model"`
+	Prompt string `json:"prompt"`
+	Size   string `json:"size"`
+	N      int    `json:"n"`
+}
 
 func (d *DiffusersClient) GenerateStreaming(ctx context.Context, prompt string, callback func(GenerationUpdate) error) error {
 	// Create request body
-	reqBody := map[string]string{"prompt": prompt}
-	body, err := json.Marshal(reqBody)
+	body, err := json.Marshal(GenerateStreamingRequest{
+		Prompt: prompt,
+	})
 	if err != nil {
 		return fmt.Errorf("error marshaling request: %w", err)
 	}
