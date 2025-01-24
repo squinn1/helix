@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	openai "github.com/sashabaranov/go-openai"
 )
 
 const SessionIDHeader = "X-Session-ID"
@@ -81,8 +82,17 @@ type RunnerNatsReplyResponse struct {
 	OwnerID       string
 	SessionID     string
 	InteractionID string
-	Progress      float64 // Percent complete 0-1.
 	DurationMs    int64
 	Error         error // Set if there was an error
 	Response      []byte
+}
+
+// Define a type for the streaming response data
+type HelixImageGenerationUpdate struct {
+	Created   int64                           `json:"created"`
+	Step      int                             `json:"step"`
+	Timestep  int                             `json:"timestep"`
+	Error     string                          `json:"error"`
+	Completed bool                            `json:"completed"`
+	Data      []openai.ImageResponseDataInner `json:"data"`
 }

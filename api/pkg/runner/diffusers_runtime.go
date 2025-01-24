@@ -22,7 +22,6 @@ import (
 	"github.com/helixml/helix/api/pkg/system"
 	"github.com/helixml/helix/api/pkg/types"
 	"github.com/rs/zerolog/log"
-	openai "github.com/sashabaranov/go-openai"
 )
 
 var (
@@ -369,15 +368,6 @@ func (d *DiffusersClient) Warm(ctx context.Context, modelName string) error {
 	return nil
 }
 
-// Define a type for the streaming response data
-type GenerationUpdate struct {
-	Created   int64                           `json:"created"`
-	Step      float64                         `json:"step"`
-	Timestep  int                             `json:"timestep"`
-	Error     string                          `json:"error"`
-	Completed bool                            `json:"completed"`
-	Data      []openai.ImageResponseDataInner `json:"data"`
-}
 type GenerateStreamingRequest struct {
 	Model  string `json:"model"`
 	Prompt string `json:"prompt"`
@@ -385,7 +375,7 @@ type GenerateStreamingRequest struct {
 	N      int    `json:"n"`
 }
 
-func (d *DiffusersClient) GenerateStreaming(ctx context.Context, prompt string, callback func(GenerationUpdate) error) error {
+func (d *DiffusersClient) GenerateStreaming(ctx context.Context, prompt string, callback func(types.HelixImageGenerationUpdate) error) error {
 	// Create request body
 	body, err := json.Marshal(GenerateStreamingRequest{
 		Prompt: prompt,
@@ -431,7 +421,7 @@ func (d *DiffusersClient) GenerateStreaming(ctx context.Context, prompt string, 
 		}
 
 		// Parse the JSON update
-		var update GenerationUpdate
+		var update types.HelixImageGenerationUpdate
 		if err := json.Unmarshal([]byte(jsonData), &update); err != nil {
 			return fmt.Errorf("error parsing response: %w", err)
 		}

@@ -14,7 +14,6 @@ import (
 
 	"github.com/jinzhu/copier"
 	"github.com/rs/zerolog/log"
-	openai "github.com/sashabaranov/go-openai"
 
 	"github.com/helixml/helix/api/pkg/data"
 	"github.com/helixml/helix/api/pkg/notification"
@@ -882,55 +881,49 @@ func (c *Controller) AddSessionToQueue(session *types.Session) error {
 				return fmt.Errorf("error unmarshalling runner response: %w", err)
 			}
 
-			log.Debug().Interface("runnerResp", runnerResp).Msg("runner response")
+			log.Trace().Interface("runnerResp", runnerResp).Msg("runner response")
 
 			if runnerResp.Error != nil {
 				return fmt.Errorf("runner error: %w", runnerResp.Error)
 			}
 
-			var taskResponse types.WebsocketEvent
+			var taskResponse *types.RunnerTaskResponse
 
 			if session.Mode == types.SessionModeInference && session.Type == types.SessionTypeImage {
-
-				// TODO(Phil): Temporary logic before we implement proper streaming.
-
 				// Remove the SSE "data: " prefix from the response
 				response := strings.TrimPrefix(string(runnerResp.Response), "data: ")
 
 				// Parse the openai response
-				var openaiResponse openai.ImageResponse
-				err = json.Unmarshal([]byte(response), &openaiResponse)
+				var imageGenerationResponse types.HelixImageGenerationUpdate
+				err = json.Unmarshal([]byte(response), &imageGenerationResponse)
 				if err != nil {
 					return fmt.Errorf("error unmarshalling openai response: %w", err)
 				}
 
 				files := []string{}
-				for _, image := range openaiResponse.Data {
+				for _, image := range imageGenerationResponse.Data {
 					files = append(files, image.URL)
 				}
 
 				// Convert nw Nats response types to old session handler types
-				taskResponse = types.WebsocketEvent{
-					Type:          types.WebsocketEventWorkerTaskResponse,
+				taskResponse = &types.RunnerTaskResponse{
 					SessionID:     session.ID,
 					InteractionID: lastInteraction.ID,
 					Owner:         session.Owner,
-					WorkerTaskResponse: &types.RunnerTaskResponse{
-						SessionID:     session.ID,
-						InteractionID: lastInteraction.ID,
-						Owner:         session.Owner,
-						Type:          types.WorkerTaskResponseTypeResult,
-						Done:          true,
-						Status:        "done",
-						Progress:      100,
-						Files:         files,
-					},
+					Type:          types.WorkerTaskResponseTypeResult,
+					Progress:      imageGenerationResponse.Step,
+					Status:        "generating...",
+				}
+				if imageGenerationResponse.Completed {
+					taskResponse.Status = "done"
+					taskResponse.Done = true
+					taskResponse.Files = files
 				}
 			} else {
 				return fmt.Errorf("unsupported session mode or type: %s %s", session.Mode, session.Type)
 			}
 
-			_, err = c.HandleRunnerResponse(c.Ctx, taskResponse.WorkerTaskResponse)
+			_, err = c.HandleRunnerResponse(c.Ctx, taskResponse)
 			if err != nil {
 				return fmt.Errorf("error handling runner response: %w", err)
 			}

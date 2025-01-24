@@ -78,7 +78,7 @@ func (s *HelixRunnerAPIServer) createHelixImageGeneration(w http.ResponseWriter,
 		return
 	}
 
-	err = diffusersClient.GenerateStreaming(r.Context(), imageRequest.Prompt, func(update GenerationUpdate) error {
+	err = diffusersClient.GenerateStreaming(r.Context(), imageRequest.Prompt, func(update types.HelixImageGenerationUpdate) error {
 		log.Trace().Interface("update", update).Msg("Image generation update")
 		if update.Error != "" {
 			http.Error(w, update.Error, http.StatusInternalServerError)
@@ -109,7 +109,7 @@ func (s *HelixRunnerAPIServer) createHelixImageGeneration(w http.ResponseWriter,
 					URL: resFiles[i],
 				})
 			}
-			finalResponse := GenerationUpdate{
+			finalResponse := types.HelixImageGenerationUpdate{
 				Created:   update.Created,
 				Step:      update.Step,
 				Timestep:  update.Timestep,
