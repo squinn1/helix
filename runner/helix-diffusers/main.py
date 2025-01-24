@@ -219,8 +219,8 @@ async def stream_progress(prompt: str):
             completed=False,
             data=[],
         )
-        
         progress_queue.put_nowait(progress.model_dump_json())
+        return callback_kwargs
 
     try:
         # Start generation in background
