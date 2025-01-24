@@ -253,6 +253,8 @@ async def stream_progress(prompt: str):
             data=[ImageResponseDataInner(url=url, b64_json="", revised_prompt="") for url in urls],
             completed=True,
             error="",
+            step=0,
+            timestep=0,
         )
         yield f"data: {final_response.model_dump_json()}\n\n"
 
