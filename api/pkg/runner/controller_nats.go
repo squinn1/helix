@@ -192,18 +192,12 @@ func (c *NatsController) handleNatsReplyRequest(ctx context.Context, path string
 		Str("request_id", helixRequest.RequestID).
 		Str("owner_id", helixRequest.OwnerID).
 		Str("session_id", helixRequest.SessionID).
-		Msg("parsed LLM request")
+		Msg("parsed nats reply request")
 
 	// Create HTTP request
-	var body bytes.Buffer
-	if err := json.NewEncoder(&body).Encode(helixRequest.Request); err != nil {
-		log.Error().Err(err).Msg("failed to encode LLM request body")
-		return &types.Response{StatusCode: 500, Body: "Failed to encode request"}
-	}
-
-	req, err := http.NewRequestWithContext(ctx, task.Method, c.serverURL+path, &body)
+	req, err := http.NewRequestWithContext(ctx, task.Method, c.serverURL+path, bytes.NewReader(helixRequest.Request))
 	if err != nil {
-		log.Error().Err(err).Msg("failed to create LLM HTTP request")
+		log.Error().Err(err).Msg("failed to create nats reply HTTP request")
 		return &types.Response{StatusCode: 500, Body: "Failed to create request"}
 	}
 
@@ -211,7 +205,7 @@ func (c *NatsController) handleNatsReplyRequest(ctx context.Context, path string
 	client := &http.Client{}
 	resp, err := client.Do(req)
 	if err != nil {
-		log.Error().Err(err).Msg("failed to execute LLM HTTP request")
+		log.Error().Err(err).Msg("failed to execute nats reply HTTP request")
 		return &types.Response{StatusCode: 500, Body: "Request failed"}
 	}
 	defer resp.Body.Close()
@@ -223,18 +217,17 @@ func (c *NatsController) handleNatsReplyRequest(ctx context.Context, path string
 	log.Trace().
 		Str("content_type", resp.Header.Get("Content-Type")).
 		Str("response_queue", responseQueue).
-		Msg("received LLM response")
+		Msg("received nats reply response")
 
 	// Handle streaming vs non-streaming responses
 	if strings.Contains(resp.Header.Get("Content-Type"), "text/event-stream") {
-		log.Debug().Msg("handling streaming LLM response")
+		log.Debug().Msg("handling streaming nats reply response")
 		return c.handleStreamingResponse(ctx, resp, responseQueue, &helixRequest, start)
 	}
-	log.Debug().Msg("handling regular LLM response")
+	log.Debug().Msg("handling regular nats reply response")
 	return c.handleRegularResponse(ctx, resp, responseQueue, &helixRequest, start)
 }
 
-// handleStreamingLLMResponse processes streaming LLM responses
 func (c *NatsController) handleStreamingResponse(ctx context.Context, resp *http.Response, responseQueue string, req *types.RunnerNatsReplyRequest, start time.Time) *types.Response {
 	log.Debug().
 		Str("request_id", req.RequestID).
