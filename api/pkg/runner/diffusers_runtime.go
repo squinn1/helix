@@ -388,7 +388,7 @@ func (d *DiffusersClient) GenerateStreaming(ctx context.Context, prompt string, 
 	}
 
 	// Create request
-	req, err := http.NewRequestWithContext(ctx, "POST", d.url+"/helix/images/generations/stream", bytes.NewBuffer(body))
+	req, err := http.NewRequestWithContext(ctx, "POST", d.url+"/v1/images/generations/stream", bytes.NewBuffer(body))
 	if err != nil {
 		return fmt.Errorf("error creating request: %w", err)
 	}
