@@ -208,11 +208,11 @@ class ImageResponse(BaseModel):
 
 
 async def stream_progress(prompt: str):
-    # Create queue for progress updates
-    progress_queue = asyncio.Queue()
+    # Use a standard Queue for thread-safe communication
+    from queue import Queue
+    progress_queue = Queue()
     
     def callback_fn(pipeline, step: int, timestep: int, callback_kwargs: Dict) -> None:
-        # Create progress update
         progress = ImageResponse(
             created=int(datetime.now().timestamp()),
             step=step,
@@ -221,11 +221,8 @@ async def stream_progress(prompt: str):
             completed=False,
             data=[],
         )
-        # Put progress directly into queue
-        asyncio.run_coroutine_threadsafe(
-            progress_queue.put(progress.model_dump_json()),
-            asyncio.get_running_loop()
-        )
+        # Use regular put() since this is a sync Queue
+        progress_queue.put(progress.model_dump_json())
         return callback_kwargs
 
     try:
@@ -241,9 +238,11 @@ async def stream_progress(prompt: str):
         # Stream progress while generating
         while not generation_task.done():
             try:
-                progress = await asyncio.wait_for(progress_queue.get(), timeout=1.0)
+                # Non-blocking queue check
+                progress = progress_queue.get_nowait()
                 yield f"data: {progress}\n\n"
-            except asyncio.TimeoutError:
+            except queue.Empty:
+                await asyncio.sleep(0.1)  # Small delay to prevent busy waiting
                 continue
 
         # Get and process final result
