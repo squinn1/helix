@@ -201,7 +201,10 @@ async def generate_image(image_input: TextToImageInput):
             None, lambda: shared_pipeline.generate(image_input.prompt)
         )
         logger.info(f"output: {output}")
-        image_path = save_image(output[0])
+        image_path, image_url = save_image(output[0])
+        print(f"image_path: {image_path}, image_url: {image_url}")
+        # TODO(Phil): This is a hack to allow the runner to upload the image to the filestore,
+        # figure out a better way, e.g. a fileserver.
         return {"data": [{"url": image_path}]}
     except Exception as e:
         raise HTTPException(
