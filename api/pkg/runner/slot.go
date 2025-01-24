@@ -7,7 +7,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/helixml/helix/api/pkg/types"
 	"github.com/rs/zerolog/log"
-	openai "github.com/sashabaranov/go-openai"
 )
 
 // Slot is the crazy mirror equivalent of scheduler.Slot
@@ -67,9 +66,10 @@ func CreateSlot(ctx context.Context, params CreateSlotParams) (*Slot, error) {
 	}
 
 	// Create OpenAI Client
-	openAIClient := openai.NewClientWithConfig(openai.ClientConfig{
-		BaseURL: r.URL() + "/v1",
-	})
+	openAIClient, err := CreateOpenaiClient(ctx, fmt.Sprintf("%s/v1", r.URL()))
+	if err != nil {
+		return nil, err
+	}
 	// Check that the model is available in this runtime
 	models, err := openAIClient.ListModels(ctx)
 	if err != nil {
