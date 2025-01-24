@@ -190,6 +190,9 @@ func (s *Scheduler) start(work *scheduler.Workload) error {
 		bestRunnerID := allRunners[rand.Intn(len(allRunners))]
 		log.Trace().Str("runner_id", bestRunnerID).Msg("chosen best runner")
 
+		// TODO(Phil): Deletion doesn't appear to be working. Create instance. Run. Restart control
+		// plane, says can't find stale slot.
+
 		// Figure out if we have to kill a slot to make room for the new one.
 		log.Trace().Str("runner_id", bestRunnerID).Uint64("memory_required", work.Model().GetMemoryRequirements(work.Mode())).Msg("deleting stale slots")
 		err := s.DeleteMostStaleStrategy(bestRunnerID, work.Model().GetMemoryRequirements(work.Mode()))

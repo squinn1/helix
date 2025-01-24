@@ -138,7 +138,20 @@ func (c *RunnerController) SubmitChatCompletionRequest(slot *scheduler.Slot, req
 	headers := map[string]string{}
 	headers[pubsub.HelixNatsReplyHeader] = pubsub.GetRunnerResponsesQueue(req.OwnerID, req.RequestID)
 
-	body, err := json.Marshal(req)
+	chatRequestBytes, err := json.Marshal(req.Request)
+	if err != nil {
+		return err
+	}
+	natsReq := types.RunnerNatsReplyRequest{
+		RequestID:     req.RequestID,
+		CreatedAt:     time.Now(),
+		OwnerID:       req.OwnerID,
+		SessionID:     req.SessionID,
+		InteractionID: req.InteractionID,
+		Request:       chatRequestBytes,
+	}
+
+	body, err := json.Marshal(natsReq)
 	if err != nil {
 		return err
 	}

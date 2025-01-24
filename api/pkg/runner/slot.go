@@ -43,7 +43,9 @@ func CreateSlot(ctx context.Context, params CreateSlotParams) (*Slot, error) {
 	var err error
 	switch params.Runtime {
 	case types.RuntimeOllama:
-		r, err = NewOllamaRuntime(ctx, OllamaRuntimeParams{}) // TODO(phil): Add params
+		r, err = NewOllamaRuntime(ctx, OllamaRuntimeParams{
+			CacheDir: &params.RunnerOptions.CacheDir,
+		}) // TODO(phil): Add params
 		if err != nil {
 			return nil, err
 		}

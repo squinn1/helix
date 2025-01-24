@@ -57,7 +57,7 @@ type Model struct {
 type OllamaRuntimeParams struct {
 	CacheDir     *string        // Where to store the models
 	Port         *int           // If nil, will be assigned a random port
-	StartTimeout *time.Duration // How long to wait for ollama to start
+	StartTimeout *time.Duration // How long to wait for ollama to start, if nil, will use default
 }
 
 func NewOllamaRuntime(ctx context.Context, params OllamaRuntimeParams) (*OllamaRuntime, error) {
@@ -268,6 +268,7 @@ func startOllamaCmd(ctx context.Context, commander Commander, port int, cacheDir
 	log.Debug().Msg("Preparing ollama serve command")
 	cmd := commander.CommandContext(ctx, ollamaPath, "serve")
 	ollamaHost := fmt.Sprintf("127.0.0.1:%d", port)
+	// TODO(Phil): ollama doesn't appear to be caching properly when in the runner docker-compose
 	cmd.Env = append(cmd.Env,
 		"HOME="+os.Getenv("HOME"),
 		"HTTP_PROXY="+os.Getenv("HTTP_PROXY"),
