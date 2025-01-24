@@ -162,6 +162,9 @@ func (s *Scheduler) start(work *scheduler.Workload) error {
 
 	var slot *scheduler.Slot // Holds the slot where the work will be scheduled.
 
+	// TODO(Phil): When runners restart, their slots are lost. But the control plane still has it in
+	// memory. So we need some way to reconcile this.
+
 	// Try to find warm slots, which are ready to take new work.
 	slots := s.WarmSlots(work)
 

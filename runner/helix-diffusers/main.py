@@ -12,6 +12,7 @@ import PIL
 import torch
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from huggingface_hub import snapshot_download
 from pydantic import BaseModel
@@ -208,9 +209,13 @@ async def generate_image(image_input: TextToImageInput):
         # figure out a better way, e.g. a fileserver.
         return {"data": [{"url": image_path}]}
     except Exception as e:
-        raise HTTPException(
+        logger.error(f"Error during image generation: {str(e)}")
+        return JSONResponse(
             status_code=500,
-            detail=f"{str(e)}\nTraceback (most recent call last):\n{traceback.format_exc()}",
+            content={"error": {
+                "code": "500",
+                "message": str(e),
+            }},
         )
 
 if __name__ == "__main__":
