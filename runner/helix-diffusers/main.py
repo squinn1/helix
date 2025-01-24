@@ -114,6 +114,7 @@ class TextToImagePipeline:
                 height=720,
                 width=1280,
                 callback_on_step_end=callback,
+                callback_on_step_end_tensor_inputs=[],
             )
             return result.images
 
