@@ -184,12 +184,10 @@ func (c *RunnerController) SubmitImageGenerationRequest(slot *scheduler.Slot, se
 	// user interactions into a single prompt. Fingers crossed there's no limits.
 	// Merge the user interactions into a single prompt
 	prompt := strings.Builder{}
-	prompt.WriteString("You are a helpful assistant that can generate images based on user interactions. Here are the previous interactions:\n")
 	for _, interaction := range userInteractions[:len(userInteractions)-1] {
 		prompt.WriteString(interaction.Message)
 		prompt.WriteString("\n")
 	}
-	prompt.WriteString("Here is the current interaction:\n")
 	prompt.WriteString(userInteractions[len(userInteractions)-1].Message)
 
 	// Convert the session to a valid image generation request
@@ -235,6 +233,12 @@ func (c *RunnerController) SubmitImageGenerationRequest(slot *scheduler.Slot, se
 }
 
 func (c *RunnerController) CreateSlot(slot *scheduler.Slot) error {
+	log.Info().
+		Str("slot_id", slot.ID.String()).
+		Str("runner_id", slot.RunnerID).
+		Str("runtime", string(slot.Runtime())).
+		Str("model", slot.ModelName().String()).
+		Msg("creating slot")
 	req := &types.CreateRunnerSlotRequest{
 		ID: slot.ID,
 		Attributes: types.CreateRunnerSlotAttributes{
@@ -261,6 +265,10 @@ func (c *RunnerController) CreateSlot(slot *scheduler.Slot) error {
 }
 
 func (c *RunnerController) DeleteSlot(runnerID string, slotID uuid.UUID) error {
+	log.Info().
+		Str("runner_id", runnerID).
+		Str("slot_id", slotID.String()).
+		Msg("deleting slot")
 	resp, err := c.Send(c.ctx, runnerID, nil, &types.Request{
 		Method: "DELETE",
 		URL:    fmt.Sprintf("/api/v1/slots/%s", slotID.String()),
