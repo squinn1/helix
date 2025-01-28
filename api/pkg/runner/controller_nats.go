@@ -97,8 +97,6 @@ func (c *NatsController) handler(ctx context.Context, msg *nats.Msg) error {
 		return err
 	}
 
-	log.Trace().Str("method", req.Method).Str("url", req.URL).Msg("received request")
-
 	// Execute the task via an HTTP handler
 	response := c.executeTaskViaHTTP(ctx, msg.Header, req)
 
