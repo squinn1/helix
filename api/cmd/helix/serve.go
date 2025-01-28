@@ -241,8 +241,7 @@ func serve(cmd *cobra.Command, cfg *config.ServerConfig) error {
 	var v2scheduler *schedulerv2.Scheduler
 	if cfg.EnableSchedulerV2 {
 		runnerController, err = schedulerv2.NewRunnerController(ctx, &schedulerv2.RunnerControllerConfig{
-			PubSub:  ps,
-			Context: ctx,
+			PubSub: ps,
 		})
 		if err != nil {
 			return err
