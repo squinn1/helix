@@ -28,8 +28,7 @@ type RunnerController struct {
 }
 
 type RunnerControllerConfig struct {
-	Context context.Context
-	PubSub  pubsub.PubSub
+	PubSub pubsub.PubSub
 }
 
 func NewRunnerController(ctx context.Context, cfg *RunnerControllerConfig) (*RunnerController, error) {

@@ -50,9 +50,10 @@ func NewNatsController(ctx context.Context, config *NatsControllerConfig) (*Nats
 		switch status {
 		case pubsub.Connected:
 			log.Info().Str("runner_id", config.RunnerID).Msg("nats connection established")
-			// Resubscribe and announce connection
-			if err := controller.setupSubscription(ctx, config.RunnerID); err != nil {
-				log.Error().Err(err).Msg("failed to setup subscription after reconnect")
+			// No need to resubscribe - NATS handles this automatically
+			// Just announce our presence
+			if err := controller.pubsub.Publish(ctx, pubsub.GetRunnerConnectedQueue(config.RunnerID), []byte("connected")); err != nil {
+				log.Error().Err(err).Msg("failed to publish connected message after reconnect")
 			}
 		case pubsub.Disconnected:
 			log.Warn().Str("runner_id", config.RunnerID).Msg("nats connection lost")

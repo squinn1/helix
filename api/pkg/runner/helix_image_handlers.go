@@ -99,7 +99,7 @@ func (s *HelixRunnerAPIServer) createHelixImageGeneration(w http.ResponseWriter,
 			}
 			resFiles, err := fileHandler.uploadFiles(sessionID, localFiles, types.FilestoreResultsDir)
 			if err != nil {
-				http.Error(w, fmt.Sprintf("failed to upload files: %w", err), http.StatusInternalServerError)
+				http.Error(w, fmt.Sprintf("failed to upload files: %s", err.Error()), http.StatusInternalServerError)
 				return err
 			}
 			// Overwrite the original urls with the new ones

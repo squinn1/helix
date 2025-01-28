@@ -538,6 +538,14 @@ func (n *Nats) StreamConsume(ctx context.Context, stream, subject string, handle
 	return &consumerWrapper{}, nil
 }
 
+func (n *Nats) NumSubscriptions() int {
+	return n.conn.NumSubscriptions()
+}
+
+func (n *Nats) Close() {
+	n.conn.Close()
+}
+
 type consumerWrapper struct{}
 
 func (c *consumerWrapper) Unsubscribe() error {

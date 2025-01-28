@@ -47,7 +47,7 @@ func TestGPUManager(t *testing.T) {
 				defer cleanup()
 			}
 
-			g := NewGPUManager()
+			g := NewGPUManager(&Options{})
 			tt.validate(t, g)
 		})
 	}
@@ -62,7 +62,7 @@ func TestPlatformSpecific(t *testing.T) {
 				t.Skip("nvidia-smi not available")
 			}
 
-			g := NewGPUManager()
+			g := NewGPUManager(&Options{})
 			if !g.hasGPU {
 				t.Skip("No GPU detected")
 			}
@@ -75,7 +75,7 @@ func TestPlatformSpecific(t *testing.T) {
 
 	case "darwin":
 		t.Run("darwin metal detection", func(t *testing.T) {
-			g := NewGPUManager()
+			g := NewGPUManager(&Options{})
 			// On Apple Silicon, Metal should always be available
 			if runtime.GOARCH == "arm64" && !g.hasGPU {
 				t.Error("Metal should be available on Apple Silicon")
@@ -84,7 +84,7 @@ func TestPlatformSpecific(t *testing.T) {
 
 	case "windows":
 		t.Run("windows wmi queries", func(t *testing.T) {
-			g := NewGPUManager()
+			g := NewGPUManager(&Options{})
 			if g.hasGPU {
 				// If GPU is detected, memory values should be consistent
 				total := g.GetTotalMemory()
