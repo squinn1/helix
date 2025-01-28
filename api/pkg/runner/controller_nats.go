@@ -117,7 +117,6 @@ func (c *NatsController) executeTaskViaHTTP(ctx context.Context, headers nats.He
 		return c.handleNatsReplyRequest(ctx, task, headers.Get(pubsub.HelixNatsReplyHeader))
 	}
 
-	log.Debug().Str("method", task.Method).Str("url", task.URL).Msg("routing to generic reply handler")
 	return c.handleGenericHTTPRequest(ctx, task)
 }
 
@@ -148,11 +147,6 @@ func (c *NatsController) handleGenericHTTPRequest(ctx context.Context, task type
 		log.Error().Err(err).Msg("failed to read response body")
 		return &types.Response{StatusCode: 500, Body: []byte("Failed to read response")}
 	}
-
-	log.Trace().
-		Int("status_code", resp.StatusCode).
-		Int("response_size", len(body)).
-		Msg("received HTTP response")
 
 	return &types.Response{
 		StatusCode: resp.StatusCode,

@@ -65,8 +65,10 @@ func NewScheduler(ctx context.Context, serverConfig *config.ServerConfig, params
 	}
 
 	// Start the queue processor
-	log.Debug().Msg("starting queue processor")
 	go s.processQueue(ctx)
+
+	// Start the slot reconciler
+	go s.reconcileSlots(ctx)
 
 	return s, nil
 }
@@ -104,6 +106,7 @@ func (s *Scheduler) Enqueue(work *scheduler.Workload) error {
 
 // processQueue runs in a goroutine to processes the queue of requests.
 func (s *Scheduler) processQueue(ctx context.Context) {
+	log.Debug().Msg("starting queue processor")
 	for {
 		select {
 		case <-ctx.Done():
@@ -112,6 +115,74 @@ func (s *Scheduler) processQueue(ctx context.Context) {
 			s.processQueueOnce()
 			// Sleep for a while to allow others to access the queue
 			time.Sleep(10 * time.Millisecond)
+		}
+	}
+}
+
+// reconcileSlots runs in a goroutine to reconcile slots.
+// The reason why we do this async is because we don't want to have to check the runner on the hot
+// path. When a user makes a request we want to forward it to a warm runner as quickly as possible.
+func (s *Scheduler) reconcileSlots(ctx context.Context) {
+	log.Debug().Msg("starting slot reconciler")
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+			s.reconcileSlotsOnce()
+			// Sleep for a while to allow others to access the queue
+			time.Sleep(100 * time.Millisecond)
+		}
+	}
+}
+
+// reconcileSlotsOnce reconciles slots once.
+func (s *Scheduler) reconcileSlotsOnce() {
+	// Get all runners
+	runnerIDs := s.controller.RunnerIDs()
+
+	// For each runner, check their actual slots against what we think they have
+	for _, runnerID := range runnerIDs {
+		// Get the actual slots from the runner
+		actualSlots, err := s.controller.Slots(runnerID)
+		if err != nil {
+			log.Error().Err(err).Str("runner_id", runnerID).Msg("failed to get slots from runner")
+			continue
+		}
+
+		// Create a map of actual slot IDs for quick lookup
+		actualSlotMap := make(map[uuid.UUID]bool)
+		for _, slot := range actualSlots {
+			actualSlotMap[slot.ID] = true
+		}
+
+		// Check our slots against the runner's actual slots
+		s.slots.Range(func(slotID uuid.UUID, slot *scheduler.Slot) bool {
+			// Only check slots for this runner
+			if slot.RunnerID != runnerID {
+				return true
+			}
+
+			// If we think we have a slot that the runner doesn't have
+			if !actualSlotMap[slotID] {
+				s.slots.Delete(slotID)
+			}
+			return true
+		})
+
+		// Any remaining slots in actualSlotMap are ones the runner has that we don't know about, so
+		// delete them
+		for slotID := range actualSlotMap {
+			log.Warn().
+				Str("runner_id", runnerID).
+				Str("slot_id", slotID.String()).
+				Msg("found slot on runner that scheduler doesn't know about")
+			// We could try to recreate the slot here, but it's safer to let the runner clean it up
+			// since we don't know its full state
+			err = s.controller.DeleteSlot(runnerID, slotID)
+			if err != nil {
+				log.Error().Err(err).Str("runner_id", runnerID).Str("slot_id", slotID.String()).Msg("failed to delete slot")
+			}
 		}
 	}
 }

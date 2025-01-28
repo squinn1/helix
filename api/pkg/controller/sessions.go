@@ -900,6 +900,8 @@ func (c *Controller) AddSessionToQueue(session *types.Session) error {
 					return fmt.Errorf("error unmarshalling openai response: %w", err)
 				}
 
+				log.Trace().Interface("imageGenerationResponse", imageGenerationResponse).Msg("image generation response")
+
 				files := []string{}
 				for _, image := range imageGenerationResponse.Data {
 					files = append(files, image.URL)

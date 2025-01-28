@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/helixml/helix/api/pkg/data"
 	"github.com/helixml/helix/api/pkg/pubsub"
 	"github.com/helixml/helix/api/pkg/scheduler"
@@ -61,7 +62,6 @@ func NewRunnerController(ctx context.Context, cfg *RunnerControllerConfig) (*Run
 }
 
 func (r *RunnerController) Send(ctx context.Context, runnerId string, headers map[string]string, req *types.Request) (*types.Response, error) {
-	log.Trace().Str("runner_id", runnerId).Interface("request", req).Msg("sending request to runner")
 	data, err := json.Marshal(req)
 	if err != nil {
 		return nil, fmt.Errorf("error marshalling request: %w", err)
@@ -77,7 +77,6 @@ func (r *RunnerController) Send(ctx context.Context, runnerId string, headers ma
 	if err := json.Unmarshal(response, &resp); err != nil {
 		return nil, fmt.Errorf("error unmarshalling response: %w", err)
 	}
-	log.Trace().Str("runner_id", runnerId).Interface("response", resp).Msg("received response from runner")
 
 	return &resp, nil
 }
@@ -257,6 +256,20 @@ func (c *RunnerController) CreateSlot(slot *scheduler.Slot) error {
 	}
 	if resp.StatusCode != http.StatusCreated {
 		return fmt.Errorf("error creating slot: %s", resp.Body)
+	}
+	return nil
+}
+
+func (c *RunnerController) DeleteSlot(runnerID string, slotID uuid.UUID) error {
+	resp, err := c.Send(c.ctx, runnerID, nil, &types.Request{
+		Method: "DELETE",
+		URL:    fmt.Sprintf("/api/v1/slots/%s", slotID.String()),
+	})
+	if err != nil {
+		return err
+	}
+	if resp.StatusCode != http.StatusNoContent {
+		return fmt.Errorf("error deleting slot: %s", resp.Body)
 	}
 	return nil
 }
