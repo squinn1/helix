@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -30,6 +31,7 @@ type HelixRunnerAPIServer struct {
 	runnerOptions *Options
 	cliContext    context.Context
 	slots         map[uuid.UUID]*Slot
+	slotsMtx      sync.RWMutex
 	gpuManager    *GPUManager
 }
 
@@ -51,6 +53,7 @@ func NewHelixRunnerAPIServer(
 	return &HelixRunnerAPIServer{
 		runnerOptions: runnerOptions,
 		slots:         make(map[uuid.UUID]*Slot),
+		slotsMtx:      sync.RWMutex{},
 		cliContext:    ctx,
 		gpuManager:    NewGPUManager(runnerOptions),
 	}, nil
@@ -118,6 +121,9 @@ func (apiServer *HelixRunnerAPIServer) status(w http.ResponseWriter, r *http.Req
 }
 
 func (apiServer *HelixRunnerAPIServer) createSlot(w http.ResponseWriter, r *http.Request) {
+	apiServer.slotsMtx.Lock()
+	defer apiServer.slotsMtx.Unlock()
+
 	slot := &types.CreateRunnerSlotRequest{}
 	json.NewDecoder(r.Body).Decode(slot)
 
@@ -160,6 +166,9 @@ func (apiServer *HelixRunnerAPIServer) createSlot(w http.ResponseWriter, r *http
 }
 
 func (apiServer *HelixRunnerAPIServer) listSlots(w http.ResponseWriter, r *http.Request) {
+	apiServer.slotsMtx.RLock()
+	defer apiServer.slotsMtx.RUnlock()
+
 	slotList := make([]types.RunnerSlot, 0, len(apiServer.slots))
 	for id, slot := range apiServer.slots {
 		slotList = append(slotList, types.RunnerSlot{
@@ -176,6 +185,9 @@ func (apiServer *HelixRunnerAPIServer) listSlots(w http.ResponseWriter, r *http.
 }
 
 func (apiServer *HelixRunnerAPIServer) deleteSlot(w http.ResponseWriter, r *http.Request) {
+	apiServer.slotsMtx.Lock()
+	defer apiServer.slotsMtx.Unlock()
+
 	slotID := mux.Vars(r)["slot_id"]
 	slotUUID, err := uuid.Parse(slotID)
 	if err != nil {

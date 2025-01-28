@@ -167,6 +167,7 @@ func (s *Scheduler) reconcileSlotsOnce() {
 				log.Warn().
 					Str("runner_id", runnerID).
 					Str("slot_id", slotID.String()).
+					Str("expected_slots", fmt.Sprintf("%v", actualSlotMap)).
 					Msg("found slot on the runner that doesn't exist on the scheduler, deleting...")
 				delete(s.slots, slotID)
 				delete(actualSlotMap, slotID)
@@ -221,6 +222,9 @@ func (s *Scheduler) processQueueOnce() {
 }
 
 func (s *Scheduler) start(work *scheduler.Workload) error {
+	s.slotsMtx.RLock()
+	defer s.slotsMtx.RUnlock()
+
 	if work == nil {
 		return fmt.Errorf("workload is nil")
 	}
@@ -234,22 +238,20 @@ func (s *Scheduler) start(work *scheduler.Workload) error {
 		return fmt.Errorf("session mode isn't set")
 	}
 
-	var slot *scheduler.Slot // Holds the slot where the work will be scheduled.
-
 	// TODO(Phil): When runners restart, their slots are lost. But the control plane still has it in
 	// memory. So we need some way to reconcile this.
 
 	// Try to find warm slots, which are ready to take new work.
-	slots := s.WarmSlots(work)
+	slots := s.warmSlots(work)
 
 	// If warm slots are available, select a random one.
 	if len(slots) > 0 {
 		// TODO(PHIL): This doesn't use the scheduling strategy. That is only used for new models.
 		// I should probably refactor this to use the strategy for all scheduling.
 		// Randomly select one warm slot from the available warm slots.
-		slot = slots[rand.Intn(len(slots))]
+		slot := slots[rand.Intn(len(slots))]
 
-		err := s.AllocateSlot(slot.ID, work)
+		err := s.allocateSlot(slot.ID, work)
 		if err != nil {
 			// Return error if unable to allocate work to the warm model.
 			return fmt.Errorf("unable to allocate work to a warm model slot (ID: %s, slot runner: %s): %w", slot.ID, slot.RunnerID, err)
@@ -272,23 +274,17 @@ func (s *Scheduler) start(work *scheduler.Workload) error {
 
 		// Figure out if we have to kill a slot to make room for the new one.
 		log.Trace().Str("runner_id", bestRunnerID).Uint64("memory_required", work.Model().GetMemoryRequirements(work.Mode())).Msg("deleting stale slots")
-		err := s.DeleteMostStaleStrategy(bestRunnerID, work.Model().GetMemoryRequirements(work.Mode()))
+		err := s.deleteMostStaleStrategy(bestRunnerID, work.Model().GetMemoryRequirements(work.Mode()))
 		if err != nil {
 			return fmt.Errorf("unable to delete stale slots: %w", err)
 		}
 
 		// Create an allocated slot
-		slot, err = s.AllocateNewSlot(bestRunnerID, work)
+		err = s.allocateNewSlot(bestRunnerID, work)
 		if err != nil {
 			// Return error if unable to allocate a new slot.
 			return fmt.Errorf("unable to allocate new work on runner (ID: %s): %w", bestRunnerID, err)
 		}
-	}
-
-	// Store the work associated with the slot for future deallocation.
-	if slot == nil {
-		// If the slot is nil, return an error.
-		return fmt.Errorf("slot is nil")
 	}
 
 	return nil
@@ -297,7 +293,7 @@ func (s *Scheduler) start(work *scheduler.Workload) error {
 // DeleteMostStaleStrategy iteratively deletes allocated work from stale slots until there is enough
 // memory to allocate the new workload.
 // TODO(Phil): implement
-func (s *Scheduler) DeleteMostStaleStrategy(runnerID string, requiredMem uint64) error {
+func (s *Scheduler) deleteMostStaleStrategy(runnerID string, requiredMem uint64) error {
 	for {
 		var allSlots []*scheduler.Slot
 		for _, slot := range s.slots {
@@ -326,7 +322,7 @@ func (s *Scheduler) DeleteMostStaleStrategy(runnerID string, requiredMem uint64)
 	return nil
 }
 
-func (s *Scheduler) WarmSlots(req *scheduler.Workload) []*scheduler.Slot {
+func (s *Scheduler) warmSlots(req *scheduler.Workload) []*scheduler.Slot {
 	s.slotsMtx.RLock()
 	defer s.slotsMtx.RUnlock()
 
@@ -379,10 +375,7 @@ func (s *Scheduler) WarmSlots(req *scheduler.Workload) []*scheduler.Slot {
 }
 
 // AllocateSlot assigns a workload to a specific slot, validating the model and slot before scheduling.
-func (s *Scheduler) AllocateSlot(slotID uuid.UUID, req *scheduler.Workload) error {
-	s.slotsMtx.RLock()
-	defer s.slotsMtx.RUnlock()
-
+func (s *Scheduler) allocateSlot(slotID uuid.UUID, req *scheduler.Workload) error {
 	// Validate model
 	if _, err := model.GetModel(req.ModelName().String()); err != nil {
 		return fmt.Errorf("unable to get model (%s): %v", req.ModelName(), err)
@@ -402,7 +395,7 @@ func (s *Scheduler) AllocateSlot(slotID uuid.UUID, req *scheduler.Workload) erro
 		return fmt.Errorf("slot already active: %s", slot.ID.String())
 	}
 
-	log.Trace().
+	log.Debug().
 		Str("runner_id", slot.RunnerID).
 		Str("slot_id", slot.ID.String()).
 		Str("model_name", slot.ModelName().String()).
@@ -443,13 +436,10 @@ func (s *Scheduler) AllocateSlot(slotID uuid.UUID, req *scheduler.Workload) erro
 }
 
 // AllocateNewSlot creates a new slot for a workload and allocates it to the best available runner.
-func (s *Scheduler) AllocateNewSlot(runnerID string, req *scheduler.Workload) (*scheduler.Slot, error) {
-	s.slotsMtx.RLock()
-	defer s.slotsMtx.RUnlock()
-
+func (s *Scheduler) allocateNewSlot(runnerID string, req *scheduler.Workload) error {
 	// Create a new slot and schedule the workload.
 	slot := scheduler.NewSlot(runnerID, req, s.modelStaleFunc, s.slotTimeoutFunc)
-	log.Trace().
+	log.Debug().
 		Str("runner_id", slot.RunnerID).
 		Str("slot_id", slot.ID.String()).
 		Str("model_name", slot.ModelName().String()).
@@ -459,14 +449,16 @@ func (s *Scheduler) AllocateNewSlot(runnerID string, req *scheduler.Workload) (*
 
 	err := s.controller.CreateSlot(slot)
 	if err != nil {
-		return nil, err
+		return err
 	}
+
+	log.Trace().Msg("slot created")
 
 	// Ensure the slot is stored.
 	s.slots[slot.ID] = slot
 
 	// Schedule and store the new slot.
-	return slot, s.AllocateSlot(slot.ID, req)
+	return s.allocateSlot(slot.ID, req)
 }
 
 // RunnerSlots returns all slots associated with a specific runner ID.

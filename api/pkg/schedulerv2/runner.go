@@ -232,12 +232,6 @@ func (c *RunnerController) SubmitImageGenerationRequest(slot *scheduler.Slot, se
 }
 
 func (c *RunnerController) CreateSlot(slot *scheduler.Slot) error {
-	log.Info().
-		Str("slot_id", slot.ID.String()).
-		Str("runner_id", slot.RunnerID).
-		Str("runtime", string(slot.Runtime())).
-		Str("model", slot.ModelName().String()).
-		Msg("creating slot")
 	req := &types.CreateRunnerSlotRequest{
 		ID: slot.ID,
 		Attributes: types.CreateRunnerSlotAttributes{
