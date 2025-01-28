@@ -160,32 +160,28 @@ func (s *Scheduler) reconcileSlotsOnce() {
 			actualSlotMap[slot.ID] = true
 		}
 
-		// Check our slots against the runner's actual slots
-		for slotID, _ := range s.slots {
-			// If we have a slot that the runner doesn't have, delete it
+		// Check that the scheduler slots match the runner's actual slots
+		for slotID := range s.slots {
 			if !actualSlotMap[slotID] {
 				log.Warn().
 					Str("runner_id", runnerID).
 					Str("slot_id", slotID.String()).
-					Str("expected_slots", fmt.Sprintf("%v", actualSlotMap)).
-					Msg("found slot on the runner that doesn't exist on the scheduler, deleting...")
+					Msg("found slot on the scheduler that doesn't exist on the runner, deleting...")
 				delete(s.slots, slotID)
-				delete(actualSlotMap, slotID)
 			}
 		}
 
-		// Any remaining slots in actualSlotMap are ones the runner has that we don't know about, so
-		// delete them
+		// Check that the runner's actual slots match the scheduler's slots
 		for slotID := range actualSlotMap {
-			log.Warn().
-				Str("runner_id", runnerID).
-				Str("slot_id", slotID.String()).
-				Msg("found slot on the scheduler that doesn't exist on the runner, deleting...")
-			// We could try to recreate the slot here, but it's safer to let the runner clean it up
-			// since we don't know its full state
-			err = s.controller.DeleteSlot(runnerID, slotID)
-			if err != nil {
-				log.Error().Err(err).Str("runner_id", runnerID).Str("slot_id", slotID.String()).Msg("failed to delete slot")
+			if _, ok := s.slots[slotID]; !ok {
+				log.Warn().
+					Str("runner_id", runnerID).
+					Str("slot_id", slotID.String()).
+					Msg("found slot on the runner that doesn't exist on the scheduler, deleting...")
+				err = s.controller.DeleteSlot(runnerID, slotID)
+				if err != nil {
+					log.Error().Err(err).Str("runner_id", runnerID).Str("slot_id", slotID.String()).Msg("failed to delete slot")
+				}
 			}
 		}
 	}
