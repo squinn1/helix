@@ -158,14 +158,14 @@ func (s *Scheduler) reconcileSlotsOnce() {
 
 		// Check our slots against the runner's actual slots
 		s.slots.Range(func(slotID uuid.UUID, slot *scheduler.Slot) bool {
-			// Only check slots for this runner
-			if slot.RunnerID != runnerID {
-				return true
-			}
-
-			// If we think we have a slot that the runner doesn't have
+			// If we have a slot that the runner doesn't have, delete it
 			if !actualSlotMap[slotID] {
+				log.Warn().
+					Str("runner_id", runnerID).
+					Str("slot_id", slotID.String()).
+					Msg("found slot on the runner that doesn't exist on the scheduler, deleting...")
 				s.slots.Delete(slotID)
+				delete(actualSlotMap, slotID)
 			}
 			return true
 		})
@@ -176,7 +176,7 @@ func (s *Scheduler) reconcileSlotsOnce() {
 			log.Warn().
 				Str("runner_id", runnerID).
 				Str("slot_id", slotID.String()).
-				Msg("found slot on runner that scheduler doesn't know about")
+				Msg("found slot on the scheduler that doesn't exist on the runner, deleting...")
 			// We could try to recreate the slot here, but it's safer to let the runner clean it up
 			// since we don't know its full state
 			err = s.controller.DeleteSlot(runnerID, slotID)
